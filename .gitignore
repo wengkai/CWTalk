@@ -1,0 +1,74 @@
+# =============================================================================
+# CWTalk — 发布到 GitHub 前请对照本文件与文末「将纳入版本库」清单
+# =============================================================================
+
+# --- 构建产物（勿提交）---
+/build/
+/test/build/
+/test
+test.bat
+*.exe
+*.dll
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# qmake / MOC / UIC 生成文件（通常在 build/ 内，此处作兜底）
+.qmake.stash
+**/moc_*.cpp
+**/moc_predefs.h
+**/ui_*.h
+**/qrc_*.cpp
+Makefile
+Makefile.*
+object_script.*
+
+
+# --- 个人配置与日志（含呼号、串口、QSO 记录，切勿提交）---
+cwtalk.ini
+**/cwtalk.ini
+*.adi
+*.adif
+log.adif
+**/log.adif
+
+# --- IDE / 编辑器（仅保留可共享的 VS Code 任务）---
+.vscode/*
+!.vscode/tasks.json
+!.vscode/extensions.json
+.idea/
+*.user
+*.pro.user
+*.pro.user.*
+*.autosave
+CMakeLists.txt.user
+*.code-workspace
+
+# Cursor / 本地 AI（若出现在项目目录内）
+.cursor/
+
+# --- 操作系统 ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# --- 临时与备份 ---
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+
+# --- 以下路径「会」纳入版本库（勿写入 ignore）---
+# src/          源代码
+# doc/          需求与路线图
+# data/cty.dat  国际冠字表（Big CTY，约 340KB，运行必需）
+# build.bat     构建脚本
+# cwtalk.ini.example  配置模板（无个人数据）
+# test/         测试源码（不含 test/build/）

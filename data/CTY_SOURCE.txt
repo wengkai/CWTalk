@@ -1,0 +1,12 @@
+data/cty.dat 来源与更新说明
+================================
+
+本文件随仓库分发的是 Big CTY 格式的业余无线电冠字表，用于呼号前缀解析。
+
+- 官方下载：https://www.country-files.com/bigcty/cty.dat
+- 格式说明：https://www.country-files.com/cty-dat-format/
+
+更新步骤：下载新版 cty.dat 覆盖本目录下的 cty.dat，无需重新编译。
+
+版权与再分发条件以 country-files.com 及文件作者说明为准；
+若仅作个人使用，一般可直接替换；公开发布软件时请自行确认是否符合其分发政策。
