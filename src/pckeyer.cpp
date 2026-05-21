@@ -146,14 +146,34 @@ void PCKeyer::update(const QString &text)
     QString newText = text.toUpper();
     
     if (!m_isSending) {
-        if (!newText.isEmpty()) {
+        if (newText.isEmpty())
+            return;
+
+        const QString sentPrefix = m_buffer.left(qMin(m_currentIndex, m_buffer.size()));
+        const bool canResume = !sentPrefix.isEmpty()
+            && m_currentIndex > 0
+            && newText.length() > m_currentIndex
+            && newText.left(m_currentIndex) == sentPrefix;
+
+        if (canResume) {
             m_buffer = newText;
-            m_currentIndex = 0;
+            m_currentPattern.clear();
+            m_patternIndex = 0;
             m_isSending = true;
             m_state = Idle;
             emit transmissionActiveChanged(true);
             nextChar();
+            return;
         }
+
+        m_buffer = newText;
+        m_currentIndex = 0;
+        m_currentPattern.clear();
+        m_patternIndex = 0;
+        m_isSending = true;
+        m_state = Idle;
+        emit transmissionActiveChanged(true);
+        nextChar();
         return;
     }
 

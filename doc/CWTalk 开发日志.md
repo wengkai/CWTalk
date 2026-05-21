@@ -1,6 +1,26 @@
 # CWTalk 开发日志
 
-按日期记录实现进展与重要决策。详细需求以《CWTalk 需求文档（正式版 v1.3）》为准。
+按日期记录实现进展与重要决策。详细需求以《CWTalk 需求文档（正式版 v1.4）》为准。
+
+---
+
+## 2026-05-21 — 通联区淡色、快捷键与发报修复
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| 记录后通联区 | `Ctrl+L` /「记录」成功后：呼号/RST/姓名/QTH/备注**保留文字、灰色淡色**；频率与发送框仍按原逻辑（频率保留、发送框清空） |
+| 淡色后键入 | 在任一通联框输入时：**先清空六框**，仅保留相对淡色快照的**新输入**（避免呼号追加在旧呼号后）；恢复正常样式 |
+| 「清除」按钮 | 仅 `clearQsoFieldsOnly()`（通联六框 + 历史面板），**不**清发送框、**不**停键控 |
+| **Esc** | `onAbortSend()`：停循环/键控、**仅清空发送框**；**不清**通联区 |
+| 发送快捷键 | **Alt+C/N/Q**：对方呼号/姓名/QTH（空则跳过）；**Alt+M**：`Station/MY_CALL`；**Alt+K**：聚焦发送框 |
+| 发完后追加 | `PCKeyer::update()`：已发前缀未变时从 `currentIndex` **续发**，避免整段重发 |
+| `.gitignore` | 增加 `*.zip` |
+
+### 主要修改文件
+
+`src/mainwindow.cpp` / `.h`，`src/pckeyer.cpp`
 
 ---
 
@@ -75,7 +95,7 @@
 
 - 基于 Grid 的方位角、距离显示（界面仍为 `---°`、`---- km`）
 - 大国家国内分区细化（CTY 已覆盖实体，未做 W1/VE 等二级展示）
-- Icom CI-V CAT
+- ~~Icom CI-V CAT~~（同日已实现，见上节 Icom）
 - `BAND`、`MY_POWER` 写入 ADIF
 - 历史记录点击自动填充 QSO 字段
 - 开源 **LICENSE** 文件（README 中已说明待补）
@@ -91,7 +111,7 @@ data/cty.dat
 README.md
 .gitignore
 cwtalk.ini.example
-doc/CWTalk 需求文档（正式版 v1.3）.md
+doc/CWTalk 需求文档（正式版 v1.4）.md
 doc/CWTalk 开发日志.md
 ```
 

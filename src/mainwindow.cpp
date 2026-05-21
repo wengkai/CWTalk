@@ -35,6 +35,42 @@
 #include <QFrame>
 #include <QRegularExpression>
 
+namespace {
+
+const char kQsoFieldStyleNormal[] =
+    "QLineEdit {"
+    "  font-size: 14px;"
+    "  font-family: Consolas, 'Courier New', monospace;"
+    "  font-weight: bold;"
+    "  padding: 6px;"
+    "  border: 2px solid #555;"
+    "  border-radius: 4px;"
+    "  background-color: #2b2b2b;"
+    "  color: #fff;"
+    "}"
+    "QLineEdit:focus {"
+    "  border-color: #4a9eff;"
+    "  background-color: #1e3a5f;"
+    "}";
+
+const char kQsoFieldStyleFaded[] =
+    "QLineEdit {"
+    "  font-size: 14px;"
+    "  font-family: Consolas, 'Courier New', monospace;"
+    "  font-weight: bold;"
+    "  padding: 6px;"
+    "  border: 2px solid #444;"
+    "  border-radius: 4px;"
+    "  background-color: #2b2b2b;"
+    "  color: #666;"
+    "}"
+    "QLineEdit:focus {"
+    "  border-color: #555;"
+    "  background-color: #2b2b2b;"
+    "}";
+
+} // namespace
+
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     m_qsoLog = new QsoLog;
@@ -244,7 +280,7 @@ void MainWindow::setupUI()
             this, &MainWindow::onManualFrequencyEdited);
 
     // 清除按钮
-    m_clearBtn = new QPushButton("清除\nEsc");
+    m_clearBtn = new QPushButton(tr("清除"));
     m_clearBtn->setFixedSize(60, 50);
     m_clearBtn->setStyleSheet(
         "QPushButton {"
@@ -421,8 +457,19 @@ void MainWindow::setupUI()
     historyLay->addWidget(m_qsoHistoryBody);
     mainLayout->addWidget(m_qsoHistoryPanel);
     
-    // 信号连接
-    connect(m_callsign, &QLineEdit::textChanged, 
+    // 信号连接（淡色通联区：键入时先释放再处理呼号逻辑）
+    const auto hookQsoFadeRelease = [this](QLineEdit *field) {
+        connect(field, &QLineEdit::textChanged,
+                this, &MainWindow::onQsoFieldEditedAfterLog);
+    };
+    hookQsoFadeRelease(m_callsign);
+    hookQsoFadeRelease(m_rstSent);
+    hookQsoFadeRelease(m_rstRcvd);
+    hookQsoFadeRelease(m_name);
+    hookQsoFadeRelease(m_qth);
+    hookQsoFadeRelease(m_comment);
+
+    connect(m_callsign, &QLineEdit::textChanged,
             this, &MainWindow::onCallsignChanged);
     connect(m_callsign, &QLineEdit::editingFinished,
             this, &MainWindow::onCallsignEditingFinished);
@@ -446,15 +493,37 @@ void MainWindow::setupUI()
     setTabOrder(m_comment, m_freqEdit);
     setTabOrder(m_freqEdit, m_sendInput);
     
-    // Alt+K 聚焦
+    // Alt+K 聚焦；Alt+C/N/Q/M 追加通联区或本台呼号到发送框
     QShortcut *altK = new QShortcut(QKeySequence("Alt+K"), this);
     connect(altK, &QShortcut::activated, [this]() {
         m_sendInput->setFocus();
     });
-    
-    // Esc 清除
-    QShortcut *esc = new QShortcut(QKeySequence("Escape"), this);
-    connect(esc, &QShortcut::activated, this, &MainWindow::onClearClicked);
+
+    const auto appendFieldShortcut = [this](const QKeySequence &seq, QLineEdit *field) {
+        auto *sc = new QShortcut(seq, this);
+        connect(sc, &QShortcut::activated, [this, field]() {
+            if (field->text().trimmed().isEmpty())
+                return;
+            appendToSendInput(field->text());
+            m_sendInput->setFocus();
+        });
+    };
+    appendFieldShortcut(QKeySequence(QStringLiteral("Alt+C")), m_callsign);
+    appendFieldShortcut(QKeySequence(QStringLiteral("Alt+N")), m_name);
+    appendFieldShortcut(QKeySequence(QStringLiteral("Alt+Q")), m_qth);
+
+    auto *altM = new QShortcut(QKeySequence(QStringLiteral("Alt+M")), this);
+    connect(altM, &QShortcut::activated, [this]() {
+        const QString myCall =
+            theConfig.getString(QStringLiteral("Station/MY_CALL"), QString()).trimmed();
+        if (myCall.isEmpty())
+            return;
+        appendToSendInput(myCall);
+        m_sendInput->setFocus();
+    });
+
+    QShortcut *esc = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(esc, &QShortcut::activated, this, &MainWindow::onAbortSend);
 
     QShortcut *logShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_L), this);
     connect(logShortcut, &QShortcut::activated, this, &MainWindow::onLogQsoClicked);
@@ -818,15 +887,79 @@ void MainWindow::onCallsignEditingFinished()
     showQsoHistoryForCall(c);
 }
 
+void MainWindow::setQsoFieldsFaded(bool faded)
+{
+    m_qsoFieldsFaded = faded;
+    m_qsoFadedSnapshots.clear();
+    if (faded) {
+        for (QLineEdit *field :
+             {m_callsign, m_rstSent, m_rstRcvd, m_name, m_qth, m_comment}) {
+            m_qsoFadedSnapshots.insert(field, field->text());
+        }
+    }
+    const QString style = faded ? QString::fromUtf8(kQsoFieldStyleFaded)
+                                : QString::fromUtf8(kQsoFieldStyleNormal);
+    for (QLineEdit *field :
+         {m_callsign, m_rstSent, m_rstRcvd, m_name, m_qth, m_comment}) {
+        field->setStyleSheet(style);
+    }
+}
+
+QString MainWindow::newInputAfterFadedSnapshot(QLineEdit *field) const
+{
+    if (!field)
+        return QString();
+    const QString baseline = m_qsoFadedSnapshots.value(field);
+    const QString current = field->text();
+    if (current.startsWith(baseline))
+        return current.mid(baseline.length());
+    return current;
+}
+
+void MainWindow::onQsoFieldEditedAfterLog()
+{
+    if (!m_qsoFieldsFaded || m_suppressQsoFieldChange)
+        return;
+
+    auto *edit = qobject_cast<QLineEdit *>(sender());
+    if (!edit)
+        return;
+
+    const QString pending = newInputAfterFadedSnapshot(edit);
+
+    m_qsoFieldsFaded = false;
+    m_suppressQsoFieldChange = true;
+    setQsoFieldsFaded(false);
+
+    for (QLineEdit *field :
+         {m_callsign, m_rstSent, m_rstRcvd, m_name, m_qth, m_comment}) {
+        field->blockSignals(true);
+        field->clear();
+        field->blockSignals(false);
+    }
+    hideQsoHistoryPanel();
+    resetQsoTiming();
+
+    edit->setText(pending);
+    edit->setCursorPosition(pending.length());
+    m_suppressQsoFieldChange = false;
+}
+
 void MainWindow::clearQsoFieldsOnly()
 {
     hideQsoHistoryPanel();
+    m_suppressQsoFieldChange = true;
+    if (m_qsoFieldsFaded)
+        setQsoFieldsFaded(false);
+    m_qsoFieldsFaded = false;
+    m_qsoFadedSnapshots.clear();
     m_callsign->clear();
     m_rstSent->clear();
     m_rstRcvd->clear();
     m_name->clear();
     m_qth->clear();
     m_comment->clear();
+    m_suppressQsoFieldChange = false;
     resetQsoTiming();
 }
 
@@ -929,7 +1062,7 @@ void MainWindow::clearUiAfterQsoLogged()
     m_sentIndex = 0;
     m_lastValidSendPlain.clear();
 
-    clearQsoFieldsOnly();
+    setQsoFieldsFaded(true);
     m_sendInput->clear();
     syncCatPollingWithKeyer();
     m_callsign->setFocus();
@@ -1082,6 +1215,24 @@ void MainWindow::clampSendCursor()
     m_sendInput->setTextCursor(c);
 }
 
+void MainWindow::appendToSendInput(const QString &text)
+{
+    const QString t = text.trimmed();
+    if (t.isEmpty() || !m_sendInput)
+        return;
+
+    cancelPostSendClearTimer();
+    m_inUserEdit = true;
+    m_sendInput->moveCursor(QTextCursor::End);
+    m_sendInput->insertPlainText(t.toUpper());
+    m_inUserEdit = false;
+    applySendInputUpdate(true);
+
+    QTextCursor cursor = m_sendInput->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    m_sendInput->setTextCursor(cursor);
+}
+
 void MainWindow::applySendInputUpdate(bool allowDeferForCatQuery)
 {
     if (m_inUserEdit || !m_keyer || !m_sendInput)
@@ -1160,7 +1311,8 @@ void MainWindow::onKeyerCharComplete(int index, QChar ch)
 
 void MainWindow::onKeyerBufferEmpty()
 {
-    m_sentIndex = 0;
+    if (m_keyer)
+        m_sentIndex = m_keyer->currentIndex();
     updateSendDisplay();
     syncCatPollingWithKeyer();
 
@@ -1179,28 +1331,31 @@ void MainWindow::onKeyerBufferEmpty()
     syncCatPollingWithKeyer();
 }
 
-void MainWindow::onClearClicked()
+void MainWindow::onAbortSend()
 {
-    hideQsoHistoryPanel();
     stopLoop();
     cancelPostSendClearTimer();
-    
-    // m_keyer->interrupt();  // 停止发送
-    m_keyer->clear();      // 清空缓冲区
+
+    if (m_keyer)
+        m_keyer->clear();
     m_sentIndex = 0;
     m_lastValidSendPlain.clear();
-    // m_sendBuffer.clear();
-    
-    // 清空所有字段...
-    m_callsign->clear();
-    m_rstSent->clear();
-    m_rstRcvd->clear();
-    m_name->clear();
-    m_qth->clear();
-    m_comment->clear();
-    m_sendInput->clear();
-    syncCatPollingWithKeyer();
 
+    if (m_sendInput) {
+        m_inUserEdit = true;
+        m_sendInput->blockSignals(true);
+        m_sendInput->clear();
+        m_sendInput->blockSignals(false);
+        m_sendInput->setFocus();
+    }
+
+    m_inUserEdit = false;
+    syncCatPollingWithKeyer();
+}
+
+void MainWindow::onClearClicked()
+{
+    clearQsoFieldsOnly();
     m_callsign->setFocus();
 }
 

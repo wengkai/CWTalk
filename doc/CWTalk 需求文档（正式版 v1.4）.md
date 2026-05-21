@@ -1,12 +1,12 @@
-# CWTalk 需求文档（正式版 v1.3）
+# CWTalk 需求文档（正式版 v1.4）
 
-**版本**：v1.3  
-**日期**：2026-05-16  
-**状态**：与当前代码实现对齐（含 2026-05-16 界面、CTY 前缀库、开源整理）  
+**版本**：v1.4  
+**日期**：2026-05-21  
+**状态**：与当前代码实现对齐（含 Icom CI-V、记录后通联区淡色、发送区快捷键、Esc/清除分工）  
 
-**相对 v1.2 的主要变更**：`CallsignPrefixDatabase` + Big CTY；历史面板文本行定稿；发送行 WPM；`[` `]` 临时提速；齿轮进设置；移除 CAT 调试日志；README / `.gitignore` / `cwtalk.ini.example`。
+**相对 v1.3 的主要变更**：Icom `IcomCatReader`；记录后通联六框淡色保留、键入清空；Esc 仅停发/清发送框、「清除」仅清通联区；Alt+C/N/Q/M 插入字段；发完后追加输入续发。
 
-**当日工作摘要**：见 `doc/CWTalk 开发日志.md`（2026-05-16）。
+**工作摘要**：见 `doc/CWTalk 开发日志.md`（2026-05-21）。
 
 ---
 
@@ -31,10 +31,10 @@
 | 项目         | 说明                                                         |
 | ------------ | ------------------------------------------------------------ |
 | **用途**     | 读取实时频率（MHz）用于界面显示与 ADIF 记录                    |
-| **实现方式** | `ICatReader` 抽象 + `CatReaderFactory`；**已实现 Yaesu**（FT-710 等，`FA`/`FB` 读频） |
+| **实现方式** | `ICatReader` 抽象 + `CatReaderFactory`；**已实现 Yaesu**（FT-710 等）与 **Icom CI-V**（IC-756PROIII，`0x03` 读频） |
 | **物理接口** | 串口（COM）或 USB 虚拟串口（Yaesu 常用 **Enhanced COM**）    |
 | **数据获取** | 频率（MHz，界面三位小数）；模式固定为 CW 写入日志              |
-| **协议范围** | **已实现**：Yaesu（`Cat/Backend=yaesu`）。**规划**：Icom CI-V（`Cat/Backend` 扩展） |
+| **协议范围** | **已实现**：Yaesu（`yaesu` / `yaesu_ft710`）；Icom（`icom_ic756pro3`，默认 CI-V 地址 **0x6E**，建议 **19200**） |
 | **开关**     | `Cat/Enabled`：关闭则不创建读频器、频率框可手动输入            |
 | **注意**     | **不用于 PTT 或键控**；与键控可**同口共享**（见下）          |
 
@@ -138,7 +138,8 @@
 **操作（已实现）：**
 - 主界面 **「记录」按钮** 或 **Ctrl+L**
 - 校验呼号非空、`Record::iscomplete()`（至少含 date/time_on/freq/mode/call/rst_sent/rst_rcvd）
-- 成功后：**清空通联区**（呼号、RST、姓名、QTH、备注、发送框）；**频率保留**；状态栏提示条数与路径
+- 成功后：**通联六框保留文字并切换为淡色**（灰字 `#666`）；**发送框清空**；**频率保留**；状态栏提示条数与路径
+- **淡色后键入**：在任一通联框输入时，六框清空并恢复正常样式，仅保留本次新输入（相对记录时快照的增量；全选替换则保留当前全文）
 
 ### 3.4 历史通联查询
 
@@ -181,8 +182,11 @@
 | **RST 输入**        | **已实现**：仅 0–3 位数字；**Tab** 时若发送/接收 RST 为空则填 `599` 并跳到下一项 |
 | **频率**            | **已实现**：MHz 三位小数；CAT 连接时只读；手动改频失焦后若与上次不同亦清除 QSO |
 | **频率变化**（CAT） | **已实现**：清除呼号/RST/姓名/QTH/备注（**不清频率**） |
-| **点击清除**        | **已实现**：清空 QSO 字段 + 隐藏历史面板 + 停止循环等 |
-| **记录通联**        | **已实现**：Ctrl+L /「记录」→ 追加 ADIF → 清空通联区（频率保留） |
+| **点击清除**        | **已实现**：仅清空通联六框 + 隐藏历史面板；**不清**发送框、**不停**键控 |
+| **Esc**             | **已实现**：停止循环与键控发送、**清空发送框**；**不清**通联区 |
+| **记录通联**        | **已实现**：Ctrl+L /「记录」→ 追加 ADIF → 通联区淡色保留、发送框清空（频率保留） |
+| **发送框快捷键**    | **已实现**：Alt+K 聚焦；Alt+C/N/Q 追加对方呼号/姓名/QTH（空跳过）；Alt+M 追加 `Station/MY_CALL` |
+| **发完后编辑**      | **已实现**：发送框追加字符时从已发位置续发，避免整段重发 |
 | **键控发射**        | **已实现**：暂停 CAT 轮询 |
 | **启动自动循环**    | **已实现**：双击 F1–F8 |
 | **打断自动循环**    | **已实现**：双击同一按钮 / Esc / Call 框输入 / 其他宏按钮 |
@@ -234,7 +238,7 @@
 | 配置键 / 项目        | 说明 |
 | -------------------- | ---- |
 | `Cat/Enabled`        | 启用 CAT 读频 |
-| `Cat/Backend`        | 读频后端（`yaesu` / `yaesu_ft710` / `ft710`） |
+| `Cat/Backend`        | 读频后端（`yaesu` / `yaesu_ft710` / `icom_ic756pro3` 等） |
 | `Cat/Poll_Interval_Ms` | 轮询间隔（默认 800） |
 | `Cat/Timeout_Ms`     | 单次读频超时（默认 1000） |
 | `Hardware/CAT_Port`  | **下拉枚举**系统串口；配置端口未插入时显示「(当前未检测到)」 |
@@ -299,7 +303,8 @@
 | **v1.0** | DTR/RTS Keying、自动循环、绿色便携、完全离线 |
 | **v1.2** | Yaesu CAT、ADIF 记录、历史文本面板、串口/CAT 设置、Tab/RST/频率 MHz（已完成） |
 | **v1.3** | Big CTY 前缀库、WPM 控件、`[` `]` 提速、齿轮设置、开源 README/gitignore（已完成） |
-| **v1.x 余量** | CI-V CAT、方位/距离、国内分区 UI、历史自动填充、BAND/MY_POWER |
+| **v1.4** | Icom CI-V、记录后淡色通联区、Alt+C/N/Q/M、Esc/清除分工、发完续发（已完成） |
+| **v1.x 余量** | 方位/距离、国内分区 UI、历史自动填充、BAND/MY_POWER |
 | **v2.x** | WinKeyer、hamlib、CW 自动识别、在线 API 辅助（可选）         |
 
 ---
@@ -325,7 +330,7 @@
 - [ ] 单可执行文件（或 + 配置文件 + 数据文件），绿色便携
 - [ ] 开箱即用，无需安装，无需网络
 - [x] Yaesu CAT 读频（FT-710：Enhanced COM、38400 验证）
-- [ ] 支持 Icom CI-V 协议（IC-7300/705/9700 等）
+- [x] 支持 Icom CI-V 读频（IC-756PROIII / `icom_ic756pro3`；其他机型待扩展）
 - [x] 自动循环稳定，打断响应及时
 - [x] Keying 电平极性可配置，适应不同接口电路
 - [x] ADIF 追加写入；`freq` MHz、`time_on`/`time_off`；可被 QLog、Logger32 等读取
@@ -342,15 +347,16 @@
 | v1.1 | 2026-02-17 | 需求基线冻结 |
 | v1.2 | 2026-05-16 | Yaesu CAT/键控协同、ADIF 记录、历史文本面板、通联区交互 |
 | v1.3 | 2026-05-16 | CTY 前缀库、WPM/提速、界面齿轮、去 CAT 调试日志、开源文档与 ignore |
+| v1.4 | 2026-05-21 | Icom CI-V、记录后淡色通联区、Alt 插入发送框、Esc/清除分工、PCKeyer 续发 |
 
-### 10.1 代码模块对照（v1.3）
+### 10.1 代码模块对照（v1.4）
 
 | 模块 | 路径 |
 | ---- | ---- |
 | ADIF 读写 | `src/adif/record.cpp`, `src/adif/file.cpp` |
 | 日志封装 | `src/qsolog.cpp` |
 | CTY 前缀 | `src/callsignprefixdb.cpp` |
-| Yaesu CAT | `src/yaesucatreader.cpp`, `src/catreaderfactory.cpp` |
+| Yaesu / Icom CAT | `src/yaesucatreader.cpp`, `src/icomcatreader.cpp`, `src/catreaderfactory.cpp` |
 | 键控 | `src/pckeyer.cpp` |
 | 主界面 | `src/mainwindow.cpp` |
 | 选项/串口 | `src/settingsdialog.cpp`, `src/config.cpp` |

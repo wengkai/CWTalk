@@ -12,6 +12,7 @@
 #include <QFrame>
 #include <QVBoxLayout>
 #include <QList>
+#include <QHash>
 #include "ikeyer.h"
 
 namespace adif {
@@ -44,6 +45,7 @@ private slots:
     void onCallsignChanged(const QString &text);
     void onCallsignEditingFinished();
     void onClearClicked();
+    void onAbortSend();
     void onLogQsoClicked();
     void onSendInputChanged();
     void onPostSendIdleClearTimeout();
@@ -73,6 +75,9 @@ private:
     void updateFrequencyFieldMode(bool catConnected);
     void updateCatFreqPlaceholder();
     void clearQsoFieldsOnly();
+    void setQsoFieldsFaded(bool faded);
+    QString newInputAfterFadedSnapshot(QLineEdit *field) const;
+    void onQsoFieldEditedAfterLog();
     void resetQsoTiming();
     double parseFrequencyMHz(const QString &text) const;
     QString formatFrequencyMHz(double mhz) const;
@@ -88,6 +93,7 @@ private:
     void resumeCatPollingIfIdle();
     bool isCatFrequencyQueryActive() const;
     void applySendInputUpdate(bool allowDeferForCatQuery = true);
+    void appendToSendInput(const QString &text);
     void loadAdifLog();
     void loadPrefixDatabase();
     QString defaultCtyPath() const;
@@ -136,6 +142,9 @@ private:
     double m_manualFreqMHz = 0.0;
     double m_lastCatFreqMHz = 0.0;
     QDateTime m_qsoTimeOn; // 首次在呼号框输入时记下，用于 ADIF time_on
+    bool m_qsoFieldsFaded = false;
+    bool m_suppressQsoFieldChange = false;
+    QHash<QLineEdit *, QString> m_qsoFadedSnapshots;
 
     // 发送状态
     int m_sentIndex = 0;        // 已发送到的位置
