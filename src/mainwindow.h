@@ -23,6 +23,7 @@ class QsoLog;
 class CallsignPrefixDatabase;
 class QSerialPort;
 class YaesuCatReader;
+class IcomCatReader;
 
 class MainWindow : public QMainWindow, public IKeyerListener
 {

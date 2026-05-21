@@ -14,6 +14,7 @@
 #include "catreaderfactory.h"
 #include "icatreader.h"
 #include "yaesucatreader.h"
+#include "icomcatreader.h"
 #include "qsolog.h"
 #include "callsignprefixdb.h"
 #include "adif/record.h"
@@ -572,6 +573,14 @@ void MainWindow::initCat()
         yaesu->setSerialPort(m_catSerial);
         if (m_serialPortsShared) {
             yaesu->setBeforeTransaction([this]() {
+                if (auto *pcKeyer = dynamic_cast<PCKeyer *>(m_keyer))
+                    pcKeyer->releaseKeyingLines();
+            });
+        }
+    } else if (auto *icom = dynamic_cast<IcomCatReader *>(m_catReader)) {
+        icom->setSerialPort(m_catSerial);
+        if (m_serialPortsShared) {
+            icom->setBeforeTransaction([this]() {
                 if (auto *pcKeyer = dynamic_cast<PCKeyer *>(m_keyer))
                     pcKeyer->releaseKeyingLines();
             });

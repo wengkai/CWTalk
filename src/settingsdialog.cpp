@@ -111,6 +111,9 @@ QString SettingsDialog::serialPortFromCombo(const QComboBox *combo) const
 void SettingsDialog::updateCatControlsEnabled()
 {
     const bool on = m_catEnabled && m_catEnabled->isChecked();
+    const QString backend = m_catBackend ? m_catBackend->currentData().toString() : QString();
+    const bool icom = backend.startsWith(QStringLiteral("icom"))
+                      || backend.startsWith(QStringLiteral("ic756"));
     if (m_catPort)
         m_catPort->setEnabled(on);
     if (m_catBackend)
@@ -120,7 +123,7 @@ void SettingsDialog::updateCatControlsEnabled()
     if (m_catPollMs)
         m_catPollMs->setEnabled(on);
     if (m_catAddress)
-        m_catAddress->setEnabled(on);
+        m_catAddress->setEnabled(on && icom);
 }
 
 QWidget *SettingsDialog::makeHardwareTab()
@@ -141,6 +144,9 @@ QWidget *SettingsDialog::makeHardwareTab()
     m_catEnabled = new QCheckBox(tr("启用 CAT 读频"));
     m_catBackend = new QComboBox;
     m_catBackend->addItem(tr("Yaesu (FT-710 等)"), QStringLiteral("yaesu"));
+    m_catBackend->addItem(tr("Icom IC-756PROIII"), QStringLiteral("icom_ic756pro3"));
+    connect(m_catBackend, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { updateCatControlsEnabled(); });
     m_catPollMs = new QSpinBox;
     m_catPollMs->setRange(200, 5000);
     m_catPollMs->setSingleStep(100);
@@ -164,7 +170,8 @@ QWidget *SettingsDialog::makeHardwareTab()
     catForm->addRow(QString(), refreshPortsBtn);
 
     auto *catHint = new QLabel(
-        tr("FT-710 请使用 USB「Enhanced COM Port (CAT-1)」，菜单中 CAT-1 波特率与此处一致（默认 38400）。"));
+        tr("Yaesu FT-710：USB「Enhanced COM Port (CAT-1)」，波特率与菜单 CAT-1 一致（默认 38400）。"
+           "Icom IC-756PROIII：接 CI-V 口，菜单 CI-V Baud Rate 默认 19200，CI-V Address 默认 0x6E。"));
     catHint->setWordWrap(true);
     catHint->setStyleSheet(QStringLiteral("color: #666; font-size: 11px;"));
 
@@ -318,8 +325,12 @@ void SettingsDialog::loadFromConfig()
     populateSerialPortCombo(m_catPort, catPort);
     populateSerialPortCombo(m_keyingPort, keyingPort);
 
-    m_catBaud->setCurrentText(QString::number(cfg.getInt("Hardware/CAT_Baud", 38400)));
-    m_catAddress->setValue(cfg.getInt("Hardware/CAT_Address", 0x94));
+    const bool icomBackend = backend.startsWith(QStringLiteral("icom"))
+                             || backend.startsWith(QStringLiteral("ic756"));
+    const int defaultBaud = icomBackend ? 19200 : 38400;
+    const int defaultAddr = icomBackend ? 0x6E : 0x94;
+    m_catBaud->setCurrentText(QString::number(cfg.getInt("Hardware/CAT_Baud", defaultBaud)));
+    m_catAddress->setValue(cfg.getInt("Hardware/CAT_Address", defaultAddr));
     const QString line = cfg.getString("Hardware/Keying_Line", "RTS").toUpper();
     m_keyingLine->setCurrentIndex(m_keyingLine->findText(line, Qt::MatchFixedString));
     m_keyingActiveLow->setChecked(cfg.getBool("Hardware/Keying_ActiveLow", false));

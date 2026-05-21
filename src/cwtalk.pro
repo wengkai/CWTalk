@@ -14,6 +14,7 @@ SOURCES += \
     settingsdialog.cpp \
     catreaderfactory.cpp \
     yaesucatreader.cpp \
+    icomcatreader.cpp \
     pckeyer.cpp \
     qsolog.cpp \
     callsignprefixdb.cpp \
@@ -27,6 +28,7 @@ HEADERS += \
     icatreader.h \
     catreaderfactory.h \
     yaesucatreader.h \
+    icomcatreader.h \
     ikeyer.h \
     pckeyer.h \
     qsolog.h \

@@ -4,7 +4,8 @@
 [Hardware]
 CAT_Port=COM3
 CAT_Baud=38400
-CAT_Address=148
+CAT_Address=110
+; Yaesu 可忽略；Icom IC-756PROIII 默认 0x6E (110)
 Keying_Port=COM8
 Keying_Line=RTS
 Keying_ActiveLow=false
@@ -30,6 +31,7 @@ CTY_Path=data/cty.dat
 [Cat]
 Enabled=true
 Backend=yaesu
+; icom_ic756pro3 = Icom IC-756PROIII
 Poll_Interval_Ms=800
 Timeout_Ms=1000
 

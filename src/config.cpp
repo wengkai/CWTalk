@@ -39,7 +39,7 @@ void Config::initDefaults()
     // 硬件设置
     set("Hardware/CAT_Port", "COM3");
     set("Hardware/CAT_Baud", 38400);  // Yaesu FT-710 CAT-1 默认 38400
-    set("Hardware/CAT_Address", 0x94);  // Icom CI-V 预留
+    set("Hardware/CAT_Address", 0x94);  // Yaesu 忽略；Icom 常用 0x6E (IC-756PROIII)
 
     set("Cat/Enabled", true);
     set("Cat/Backend", "yaesu");

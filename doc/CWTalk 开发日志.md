@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-05-21 — Icom CI-V（IC-756PROIII）
+
+### 已完成
+
+- 新增 `IcomCatReader`：CI-V `0x03` 读当前 VFO 频率（5 字节 BCD，Hz）
+- 设置中协议可选 **Icom IC-756PROIII**（`Cat/Backend=icom_ic756pro3`）
+- 默认 CI-V 地址 **0x6E**、建议波特率 **19200**（与机内菜单一致）
+- 与 Yaesu 相同：轮询、发射时暂停、CAT/键控同口时 `releaseKeyingLines`
+
+### 配置提示
+
+| 项 | IC-756PROIII |
+|----|----------------|
+| 协议 | Icom IC-756PROIII |
+| 波特率 | 19200（菜单 CI-V Baud Rate） |
+| CI-V 地址 | 0x6E（菜单默认） |
+
+
 ## 2026-05-16 — v1.2 / 开源准备日
 
 ### 当日目标

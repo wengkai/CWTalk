@@ -6,6 +6,7 @@
 /build/
 /test/build/
 /test
+/deploy
 test.bat
 *.exe
 *.dll
