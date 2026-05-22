@@ -13,6 +13,8 @@
 #include <QVBoxLayout>
 #include <QList>
 #include <QHash>
+#include <QShortcut>
+#include "adif/record.h"
 #include "ikeyer.h"
 
 namespace adif {
@@ -21,6 +23,7 @@ class Record;
 
 class ICatReader;
 class QsoLog;
+class SessionLogWindow;
 class CallsignPrefixDatabase;
 class QSerialPort;
 class YaesuCatReader;
@@ -47,6 +50,8 @@ private slots:
     void onClearClicked();
     void onAbortSend();
     void onLogQsoClicked();
+    void onSessionLogDeleteRequested(int index);
+    void onSessionLogEditRequested(int index);
     void onSendInputChanged();
     void onPostSendIdleClearTimeout();
     void onOpenSettings();
@@ -77,6 +82,7 @@ private:
     void clearQsoFieldsOnly();
     void setQsoFieldsFaded(bool faded);
     QString newInputAfterFadedSnapshot(QLineEdit *field) const;
+    void releaseQsoFieldsFadeForEdit(QLineEdit *edit);
     void onQsoFieldEditedAfterLog();
     void resetQsoTiming();
     double parseFrequencyMHz(const QString &text) const;
@@ -103,6 +109,18 @@ private:
     void hideQsoHistoryPanel();
     void showQsoHistoryForCall(const QString &call);
     void applyWpmToKeyer(int wpm);
+    void initSessionLogWindow();
+    void enterQsoEditMode(int sessionIndex, const adif::Record &rec);
+    void exitQsoEditMode(bool clearAllFields);
+    void setQsoEditModeUi(bool editing);
+    void loadRecordToUi(const adif::Record &rec);
+    void clearAllInputFieldsNoFade();
+
+protected:
+    void moveEvent(QMoveEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void changeEvent(QEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
 
     // 第一行：6个输入框
     QLineEdit *m_callsign;
@@ -116,6 +134,13 @@ private:
     QLineEdit *m_freqEdit = nullptr;
     QSpinBox *m_wpmSpin = nullptr;
     QsoLog *m_qsoLog = nullptr;
+    SessionLogWindow *m_sessionLog = nullptr;
+    bool m_qsoEditMode = false;
+    int m_editingSessionIndex = -1;
+    adif::Record m_editingOriginalRecord;
+    QString m_logBtnDefaultText;
+    bool m_ignoreCatWhileEditing = false;
+    QList<QShortcut *> m_shortcutsDisabledInEdit;
     CallsignPrefixDatabase *m_prefixDb = nullptr;
 
     // 第二行：解析信息

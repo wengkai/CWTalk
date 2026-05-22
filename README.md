@@ -14,6 +14,7 @@
 | **临时提速** | 宏或发送内容中用 `[` `]` 包裹的段落按 **1.5× WPM** 发送（括号本身不发码） |
 | **CAT 读频** | Yaesu（FT-710 等）或 Icom CI-V（IC-756PROIII）；可与键控同口；发射时暂停轮询 |
 | **通联记录** | ADIF v3 追加写入；**记录** / `Ctrl+L`；记录后通联区淡色保留，键入即开新 QSO |
+| **当次日志** | 浮动窗口显示本次运行已记 QSO；双击编辑、右键删除（写回 `log.adif`） |
 | **呼号解析** | 启动加载 `data/cty.dat`，实时显示国家、CQ/ITU 区、大洲 |
 | **历史查询** | 呼号失焦后显示该台最近 5 条 QSO（逗号分隔文本行） |
 
@@ -72,7 +73,8 @@ build\release\CWTalk.exe
 | `Alt+M` | 将 `Station/MY_CALL` 追加到发送框 |
 | `Esc` | 停止发送与 CQ 循环，清空发送框（不清通联区） |
 | **清除** 按钮 | 仅清空通联六框 |
-| `Ctrl+L` | 记录当前通联到 ADIF |
+| `Ctrl+L` | 记录当前通联到 ADIF（编辑模式下为保存） |
+| 当次日志 **双击** | 载入该条到通联区编辑；**右键** 删除（需确认） |
 | `Tab`（RST 框） | 空 RST 自动填 `599` 并跳到下一项 |
 | `F1`–`F8` | 触发对应快捷键宏 |
 | 双击 F 键按钮 | 开始/停止该宏 CQ 循环 |
@@ -89,6 +91,8 @@ cwtalk/
 │   ├── pckeyer.*        # 摩尔斯键控
 │   ├── yaesucatreader.* # Yaesu CAT
 │   ├── icomcatreader.*  # Icom CI-V CAT
+│   ├── sessionlogwindow.*  # 当次日志浮动窗
+│   ├── qsorecordformat.*   # ADIF 行文本格式
 │   └── callsignprefixdb.* # CTY 冠字表查询
 ├── data/
 │   └── cty.dat          # Big CTY 冠字表（运行必需，可定期更新）
@@ -111,7 +115,7 @@ cwtalk/
 ## 开发说明
 
 - 工程文件：`src/cwtalk.pro`
-- 详细需求见：`doc/CWTalk 需求文档（正式版 v1.4）.md`
+- 详细需求见：`doc/CWTalk 需求文档（正式版 v1.5）.md`
 - 开发摘要见：`doc/CWTalk 开发日志.md`
 - 发布前请核对 `.gitignore`，确保未提交 `cwtalk.ini`、日志与 `build/` 产物
 

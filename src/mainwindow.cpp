@@ -17,9 +17,13 @@
 #include "icomcatreader.h"
 #include "qsolog.h"
 #include "callsignprefixdb.h"
+#include "sessionlogwindow.h"
+#include "qsorecordformat.h"
 #include "adif/record.h"
 
+#include <QApplication>
 #include <QMessageBox>
+#include <QEventLoop>
 #include <QDateTime>
 #include <QRegularExpressionValidator>
 #include <QToolButton>
@@ -34,6 +38,9 @@
 #include <QStatusBar>
 #include <QFrame>
 #include <QRegularExpression>
+#include <QMoveEvent>
+#include <QResizeEvent>
+#include <QCloseEvent>
 
 namespace {
 
@@ -79,13 +86,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     loadPrefixDatabase();
     loadAdifLog();
     initHardware();
+    initSessionLogWindow();
     setWindowTitle("CWTalk - 日常 CW 通联");
     resize(1020, 180);
 }
 
 MainWindow::~MainWindow()
 {
+    if (m_sessionLog)
+        m_sessionLog->saveGeometryToConfig();
     shutdownHardware();
+    delete m_sessionLog;
     delete m_prefixDb;
     delete m_qsoLog;
 }
@@ -310,6 +321,7 @@ void MainWindow::setupUI()
         "QPushButton:pressed { background-color: #0d3d0d; }"
     );
     connect(m_logBtn, &QPushButton::clicked, this, &MainWindow::onLogQsoClicked);
+    m_logBtnDefaultText = m_logBtn->text();
     inputRow->addWidget(m_logBtn);
     
     inputRow->addStretch();
@@ -494,15 +506,24 @@ void MainWindow::setupUI()
     setTabOrder(m_freqEdit, m_sendInput);
     
     // Alt+K 聚焦；Alt+C/N/Q/M 追加通联区或本台呼号到发送框
-    QShortcut *altK = new QShortcut(QKeySequence("Alt+K"), this);
+    const auto regShortcutForEdit = [this](QShortcut *sc) {
+        m_shortcutsDisabledInEdit.append(sc);
+    };
+
+    auto *altK = new QShortcut(QKeySequence("Alt+K"), this);
+    regShortcutForEdit(altK);
     connect(altK, &QShortcut::activated, [this]() {
+        if (m_qsoEditMode)
+            return;
         m_sendInput->setFocus();
     });
 
-    const auto appendFieldShortcut = [this](const QKeySequence &seq, QLineEdit *field) {
+    const auto appendFieldShortcut = [this, &regShortcutForEdit](const QKeySequence &seq,
+                                                                QLineEdit *field) {
         auto *sc = new QShortcut(seq, this);
+        regShortcutForEdit(sc);
         connect(sc, &QShortcut::activated, [this, field]() {
-            if (field->text().trimmed().isEmpty())
+            if (m_qsoEditMode || field->text().trimmed().isEmpty())
                 return;
             appendToSendInput(field->text());
             m_sendInput->setFocus();
@@ -513,7 +534,10 @@ void MainWindow::setupUI()
     appendFieldShortcut(QKeySequence(QStringLiteral("Alt+Q")), m_qth);
 
     auto *altM = new QShortcut(QKeySequence(QStringLiteral("Alt+M")), this);
+    regShortcutForEdit(altM);
     connect(altM, &QShortcut::activated, [this]() {
+        if (m_qsoEditMode)
+            return;
         const QString myCall =
             theConfig.getString(QStringLiteral("Station/MY_CALL"), QString()).trimmed();
         if (myCall.isEmpty())
@@ -746,7 +770,7 @@ void MainWindow::updateCatFreqPlaceholder()
 
 void MainWindow::onCatFrequencyChanged(double mhz)
 {
-    if (!m_freqEdit)
+    if (!m_freqEdit || m_ignoreCatWhileEditing)
         return;
 
     if (m_catActive && m_lastCatFreqMHz > 0.0
@@ -916,16 +940,14 @@ QString MainWindow::newInputAfterFadedSnapshot(QLineEdit *field) const
     return current;
 }
 
-void MainWindow::onQsoFieldEditedAfterLog()
+void MainWindow::releaseQsoFieldsFadeForEdit(QLineEdit *edit)
 {
-    if (!m_qsoFieldsFaded || m_suppressQsoFieldChange)
+    if (!m_qsoFieldsFaded || m_suppressQsoFieldChange || !edit)
         return;
 
-    auto *edit = qobject_cast<QLineEdit *>(sender());
-    if (!edit)
-        return;
-
-    const QString pending = newInputAfterFadedSnapshot(edit);
+    QString pending = newInputAfterFadedSnapshot(edit);
+    if (edit == m_callsign)
+        pending = pending.toUpper();
 
     m_qsoFieldsFaded = false;
     m_suppressQsoFieldChange = true;
@@ -943,6 +965,14 @@ void MainWindow::onQsoFieldEditedAfterLog()
     edit->setText(pending);
     edit->setCursorPosition(pending.length());
     m_suppressQsoFieldChange = false;
+}
+
+void MainWindow::onQsoFieldEditedAfterLog()
+{
+    auto *edit = qobject_cast<QLineEdit *>(sender());
+    if (!edit)
+        return;
+    releaseQsoFieldsFadeForEdit(edit);
 }
 
 void MainWindow::clearQsoFieldsOnly()
@@ -1010,12 +1040,19 @@ void MainWindow::loadAdifLog()
 adif::Record MainWindow::buildQsoRecordFromUi()
 {
     adif::Record rec;
-    const QDateTime timeOff = QDateTime::currentDateTime();
-    const QDateTime timeOn = m_qsoTimeOn.isValid() ? m_qsoTimeOn : timeOff;
 
-    rec.set_field("qso_date", timeOn.toString("yyyyMMdd").toStdString());
-    rec.set_field("time_on", timeOn.toString("HHmmss").toStdString());
-    rec.set_field("time_off", timeOff.toString("HHmmss").toStdString());
+    if (m_qsoEditMode) {
+        rec.set_field("qso_date", m_editingOriginalRecord.get_field("qso_date"));
+        rec.set_field("time_on", m_editingOriginalRecord.get_field("time_on"));
+        rec.set_field("time_off", m_editingOriginalRecord.get_field("time_off"));
+    } else {
+        const QDateTime timeOff = QDateTime::currentDateTime();
+        if (!m_qsoTimeOn.isValid())
+            m_qsoTimeOn = timeOff;
+        rec.set_field("qso_date", m_qsoTimeOn.toString("yyyyMMdd").toStdString());
+        rec.set_field("time_on", m_qsoTimeOn.toString("HHmmss").toStdString());
+        rec.set_field("time_off", timeOff.toString("HHmmss").toStdString());
+    }
 
     const double mhz = currentFrequencyMHz();
     if (mhz > 0.0)
@@ -1045,9 +1082,15 @@ adif::Record MainWindow::buildQsoRecordFromUi()
     if (!comment.isEmpty())
         rec.set_field("comment", comment.toStdString());
 
-    const QString myRig = theConfig.getString("Station/MY_RIG", "").trimmed();
-    if (!myRig.isEmpty())
-        rec.set_field("my_rig", myRig.toStdString());
+    if (m_qsoEditMode) {
+        const std::string origRig = m_editingOriginalRecord.get_field("my_rig");
+        if (!origRig.empty())
+            rec.set_field("my_rig", origRig);
+    } else {
+        const QString myRig = theConfig.getString("Station/MY_RIG", "").trimmed();
+        if (!myRig.isEmpty())
+            rec.set_field("my_rig", myRig.toStdString());
+    }
 
     return rec;
 }
@@ -1082,7 +1125,31 @@ void MainWindow::onLogQsoClicked()
 
     const adif::Record rec = buildQsoRecordFromUi();
     if (!rec.iscomplete()) {
-        QMessageBox::warning(this, tr("记录日志"), tr("日志字段不完整，无法写入。"));
+        QString detail = tr("日志字段不完整，无法写入。");
+        if (QString::fromStdString(rec.get_field("freq")).trimmed().isEmpty())
+            detail += QLatin1Char('\n')
+                      + tr("缺少频率：请在频率框输入 MHz，或等待 CAT 读频。");
+        QMessageBox::warning(this, tr("记录日志"), detail);
+        return;
+    }
+
+    if (m_qsoEditMode) {
+        statusBar()->showMessage(tr("正在保存日志…"));
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        if (!m_qsoLog->updateAndSave(m_editingOriginalRecord, rec)) {
+            QMessageBox::warning(
+                this, tr("保存日志"),
+                tr("无法更新日志（可能与其它记录冲突）：\n%1")
+                    .arg(m_qsoLog->filePath()));
+            return;
+        }
+        if (m_sessionLog && m_editingSessionIndex >= 0)
+            m_sessionLog->updateRecordAt(m_editingSessionIndex, rec);
+
+        hideQsoHistoryPanel();
+        exitQsoEditMode(true);
+        statusBar()->showMessage(
+            tr("已保存 %1").arg(call.toUpper()), 4000);
         return;
     }
 
@@ -1091,6 +1158,15 @@ void MainWindow::onLogQsoClicked()
             this, tr("记录日志"),
             tr("无法写入日志文件：\n%1").arg(m_qsoLog->filePath()));
         return;
+    }
+
+    if (m_sessionLog) {
+        m_sessionLog->appendRecord(rec);
+        if (!m_sessionLog->isVisible()) {
+            m_sessionLog->syncAttachedGeometry();
+            m_sessionLog->show();
+            m_sessionLog->raise();
+        }
     }
 
     hideQsoHistoryPanel();
@@ -1119,8 +1195,18 @@ double MainWindow::parseFrequencyMHz(const QString &text) const
 
 double MainWindow::currentFrequencyMHz() const
 {
-    if (m_catActive && m_catReader)
-        return m_catReader->frequencyMHz();
+    if (m_freqEdit) {
+        const double fromUi = parseFrequencyMHz(m_freqEdit->text());
+        if (fromUi > 0.0)
+            return fromUi;
+    }
+    if (m_catActive && m_catReader) {
+        const double cat = m_catReader->frequencyMHz();
+        if (cat > 0.0)
+            return cat;
+    }
+    if (m_lastCatFreqMHz > 0.0)
+        return m_lastCatFreqMHz;
     return m_manualFreqMHz;
 }
 
@@ -1217,6 +1303,9 @@ void MainWindow::clampSendCursor()
 
 void MainWindow::appendToSendInput(const QString &text)
 {
+    if (m_qsoEditMode)
+        return;
+
     const QString t = text.trimmed();
     if (t.isEmpty() || !m_sendInput)
         return;
@@ -1235,7 +1324,7 @@ void MainWindow::appendToSendInput(const QString &text)
 
 void MainWindow::applySendInputUpdate(bool allowDeferForCatQuery)
 {
-    if (m_inUserEdit || !m_keyer || !m_sendInput)
+    if (m_qsoEditMode || m_inUserEdit || !m_keyer || !m_sendInput)
         return;
 
     cancelPostSendClearTimer();
@@ -1333,6 +1422,9 @@ void MainWindow::onKeyerBufferEmpty()
 
 void MainWindow::onAbortSend()
 {
+    if (m_qsoEditMode)
+        return;
+
     stopLoop();
     cancelPostSendClearTimer();
 
@@ -1355,6 +1447,10 @@ void MainWindow::onAbortSend()
 
 void MainWindow::onClearClicked()
 {
+    if (m_qsoEditMode) {
+        exitQsoEditMode(true);
+        return;
+    }
     clearQsoFieldsOnly();
     m_callsign->setFocus();
 }
@@ -1405,6 +1501,7 @@ void MainWindow::setupMacroButtons(QVBoxLayout *mainLayout)
     // F1-F8 快捷键绑定（键盘仍视为单次发送）
     for (int i = 0; i < 8; ++i) {
         QShortcut *shortcut = new QShortcut(QKeySequence(QString("F%1").arg(i+1)), this);
+        m_shortcutsDisabledInEdit.append(shortcut);
         connect(shortcut, &QShortcut::activated, [this, i]() {
             triggerMacro(i);
         });
@@ -1574,6 +1671,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
 void MainWindow::triggerMacro(int index)
 {
+    if (m_qsoEditMode) {
+        statusBar()->showMessage(tr("编辑日志时无法使用宏快捷键"), 2500);
+        return;
+    }
+
     cancelPostSendClearTimer();
 
     // 如果点击了其他宏按钮，停止当前循环
@@ -1628,6 +1730,9 @@ QString MainWindow::expandMacro(const QString &macro)
 
 void MainWindow::editMacro(int index)
 {
+    if (m_qsoEditMode)
+        return;
+
     QString keyTitle = QString("Shortcuts/F%1_Title").arg(index+1);
     QString keyContent = QString("Shortcuts/F%1_Content").arg(index+1);
     
@@ -1672,10 +1777,23 @@ void MainWindow::editMacro(int index)
     }
 }
 
-void MainWindow::onCallsignChanged(const QString &text)
+void MainWindow::onCallsignChanged(const QString & /*text*/)
 {
-    const QString upper = text.toUpper();
-    if (upper != text) {
+    if (!m_callsign)
+        return;
+
+    // 必须用控件当前文本：textChanged 传入的 text 是发射时的旧值，淡色清除后
+    // 若仍用该参数做大写转换会把「旧呼号+新键」整段写回。
+    const QString current = m_callsign->text();
+
+    if (m_qsoFieldsFaded && !m_suppressQsoFieldChange) {
+        releaseQsoFieldsFadeForEdit(m_callsign);
+        onCallsignChanged(QString());
+        return;
+    }
+
+    const QString upper = current.toUpper();
+    if (upper != current) {
         const int pos = m_callsign->cursorPosition();
         m_callsign->blockSignals(true);
         m_callsign->setText(upper);
@@ -1735,4 +1853,221 @@ void MainWindow::onCallsignChanged(const QString &text)
         "background-color: #1a2f4a; border-radius: 4px; "
         "font-family: Consolas, monospace; font-weight: bold;"
     );
+}
+
+void MainWindow::initSessionLogWindow()
+{
+    m_sessionLog = new SessionLogWindow();
+    m_sessionLog->setMainWindow(this);
+    connect(m_sessionLog, &SessionLogWindow::deleteRecordRequested, this,
+            &MainWindow::onSessionLogDeleteRequested);
+    connect(m_sessionLog, &SessionLogWindow::editRecordRequested, this,
+            &MainWindow::onSessionLogEditRequested);
+}
+
+void MainWindow::loadRecordToUi(const adif::Record &rec)
+{
+    auto field = [&](const char *key) {
+        return QString::fromStdString(rec.get_field(key)).trimmed();
+    };
+
+    m_callsign->setText(field("call"));
+    m_rstSent->setText(field("rst_sent"));
+    m_rstRcvd->setText(field("rst_rcvd"));
+    m_name->setText(field("name"));
+    m_qth->setText(field("qth"));
+    m_comment->setText(field("comment"));
+
+    const QString freqRaw = field("freq");
+    if (!freqRaw.isEmpty()) {
+        bool ok = false;
+        const double mhz = QLocale::c().toDouble(freqRaw, &ok);
+        if (ok && mhz > 0.0)
+            m_freqEdit->setText(formatFrequencyMHz(mhz));
+        else
+            m_freqEdit->setText(freqRaw);
+    } else {
+        m_freqEdit->clear();
+    }
+}
+
+void MainWindow::clearAllInputFieldsNoFade()
+{
+    m_suppressQsoFieldChange = true;
+    if (m_qsoFieldsFaded)
+        setQsoFieldsFaded(false);
+    m_qsoFieldsFaded = false;
+    m_qsoFadedSnapshots.clear();
+
+    m_callsign->clear();
+    m_rstSent->clear();
+    m_rstRcvd->clear();
+    m_name->clear();
+    m_qth->clear();
+    m_comment->clear();
+    m_suppressQsoFieldChange = false;
+    resetQsoTiming();
+
+    if (m_sendInput) {
+        m_inUserEdit = true;
+        m_sendInput->blockSignals(true);
+        m_sendInput->clear();
+        m_sendInput->blockSignals(false);
+        m_inUserEdit = false;
+        m_lastValidSendPlain.clear();
+    }
+    if (m_keyer)
+        m_keyer->clear();
+    m_sentIndex = 0;
+}
+
+void MainWindow::setQsoEditModeUi(bool editing)
+{
+    if (m_sendInput)
+        m_sendInput->setReadOnly(editing);
+
+    for (QShortcut *sc : m_shortcutsDisabledInEdit) {
+        if (sc)
+            sc->setEnabled(!editing);
+    }
+    for (int i = 0; i < 8; ++i) {
+        if (m_macroButtons[i])
+            m_macroButtons[i]->setEnabled(!editing);
+    }
+
+    if (m_logBtn)
+        m_logBtn->setText(editing ? tr("保存\nCtrl+L") : m_logBtnDefaultText);
+
+    if (editing) {
+        if (m_freqEdit)
+            m_freqEdit->setReadOnly(false);
+    } else {
+        updateFrequencyFieldMode(m_catActive);
+    }
+}
+
+void MainWindow::enterQsoEditMode(int sessionIndex, const adif::Record &rec)
+{
+    stopLoop();
+    cancelPostSendClearTimer();
+    if (m_keyer)
+        m_keyer->clear();
+    m_sentIndex = 0;
+    m_lastValidSendPlain.clear();
+    hideQsoHistoryPanel();
+
+    if (m_qsoFieldsFaded)
+        setQsoFieldsFaded(false);
+
+    m_editingSessionIndex = sessionIndex;
+    m_editingOriginalRecord = rec;
+    m_qsoEditMode = true;
+    m_ignoreCatWhileEditing = true;
+
+    loadRecordToUi(rec);
+    setQsoEditModeUi(true);
+    m_callsign->setFocus();
+}
+
+void MainWindow::exitQsoEditMode(bool clearAllFields)
+{
+    if (!m_qsoEditMode)
+        return;
+
+    m_qsoEditMode = false;
+    m_editingSessionIndex = -1;
+    m_editingOriginalRecord = adif::Record{};
+    m_ignoreCatWhileEditing = false;
+    setQsoEditModeUi(false);
+
+    if (clearAllFields)
+        clearAllInputFieldsNoFade();
+}
+
+void MainWindow::onSessionLogDeleteRequested(int index)
+{
+    if (!m_qsoLog || !m_sessionLog)
+        return;
+
+    if (index < 0 || index >= m_sessionLog->recordCount())
+        return;
+
+    const adif::Record rec = m_sessionLog->recordAt(index);
+    const QString line = formatSessionLogLine(rec);
+    const auto reply = QMessageBox::question(
+        this, tr("删除记录"),
+        tr("确定从日志文件中永久删除以下记录？此操作不可恢复。\n\n%1").arg(line),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+        return;
+
+    if (!m_qsoLog->removeAndSave(rec)) {
+        QMessageBox::warning(this, tr("删除记录"), tr("无法从日志文件删除该记录。"));
+        return;
+    }
+
+    if (m_qsoEditMode && m_editingSessionIndex == index)
+        exitQsoEditMode(true);
+    else if (m_qsoEditMode && m_editingSessionIndex > index)
+        --m_editingSessionIndex;
+
+    m_sessionLog->removeRecordAt(index);
+    statusBar()->showMessage(tr("已删除一条当次记录"), 3000);
+}
+
+void MainWindow::onSessionLogEditRequested(int index)
+{
+    if (!m_sessionLog)
+        return;
+
+    if (m_qsoEditMode) {
+        QMessageBox::information(this, tr("编辑日志"),
+                                 tr("请先保存或清除当前编辑。"));
+        return;
+    }
+
+    if (index < 0 || index >= m_sessionLog->recordCount())
+        return;
+
+    enterQsoEditMode(index, m_sessionLog->recordAt(index));
+}
+
+void MainWindow::moveEvent(QMoveEvent *event)
+{
+    QMainWindow::moveEvent(event);
+    if (m_sessionLog && m_sessionLog->isVisible() && m_sessionLog->isAttached())
+        m_sessionLog->syncAttachedGeometry();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    if (m_sessionLog && m_sessionLog->isVisible() && m_sessionLog->isAttached())
+        m_sessionLog->syncAttachedGeometry();
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (!m_sessionLog || !m_sessionLog->isVisible())
+        return;
+    if (event->type() != QEvent::WindowStateChange)
+        return;
+
+    if (isMinimized())
+        m_sessionLog->showMinimized();
+    else if (m_sessionLog->isMinimized())
+        m_sessionLog->showNormal();
+
+    if (m_sessionLog->isAttached())
+        m_sessionLog->syncAttachedGeometry();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_sessionLog) {
+        m_sessionLog->saveGeometryToConfig();
+        m_sessionLog->close();
+    }
+    QMainWindow::closeEvent(event);
 }

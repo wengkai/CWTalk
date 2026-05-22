@@ -1,6 +1,34 @@
 # CWTalk 开发日志
 
-按日期记录实现进展与重要决策。详细需求以《CWTalk 需求文档（正式版 v1.4）》为准。
+按日期记录实现进展与重要决策。详细需求以《CWTalk 需求文档（正式版 v1.5）》为准。
+
+---
+
+## 2026-05-21 — 当次日志窗口与 ADIF 编辑
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| 当次日志窗 | 浮动 `SessionLogWindow`：首条记录后出现；默认贴主窗口上方同宽（约 5 行）；可拖离、可最小化；几何写入 `[SessionLog]` |
+| 列表行 | `qso_date, time_on, freq, call, rst_sent, rst_rcvd, name, qth, comment`（空字段保留连续逗号）；时间正序、最新在底、自动滚到底 |
+| 右键删除 | 二次确认；`QsoLog::removeAndSave` 真删 ADIF 文件内容 |
+| 双击编辑 | 载入通联区；`time_on/time_off/qso_date` 不变；`call`/RST/姓名/QTH/备注/频率可改；编辑时停发、发送框只读、宏与 Alt 禁用；按钮「保存」/`Ctrl+L` |
+| 保存/清除 | 保存：`updateAndSave` 后清空全部输入（无淡色）；清除：不保存并清空退出编辑 |
+| ADIF 写盘 | 新记录仍追加；编辑/删除：等长记录文件内原地覆盖，否则内存拼接后 `QSaveFile` 一次写入 |
+| 记日志修复 | 频率优先读频率框/CAT/`m_lastCatFreqMHz`；首条记录不再误要求填满姓名等可选框 |
+| 淡色呼号修复 | `onCallsignChanged` 改读控件当前文本，避免 `textChanged` 旧参数把整段旧呼号写回 |
+
+### 主要新增/修改文件
+
+```
+src/sessionlogwindow.cpp / .h
+src/qsorecordformat.cpp / .h
+src/qsolog.cpp / .h
+src/mainwindow.cpp / .h
+src/config.cpp
+cwtalk.ini.example
+```
 
 ---
 

@@ -17,6 +17,8 @@ SOURCES += \
     icomcatreader.cpp \
     pckeyer.cpp \
     qsolog.cpp \
+    qsorecordformat.cpp \
+    sessionlogwindow.cpp \
     callsignprefixdb.cpp \
     adif/record.cpp \
     adif/file.cpp
@@ -32,6 +34,8 @@ HEADERS += \
     ikeyer.h \
     pckeyer.h \
     qsolog.h \
+    qsorecordformat.h \
+    sessionlogwindow.h \
     callsignprefixdb.h \
     adif/record.h \
     adif/file.h

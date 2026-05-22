@@ -67,6 +67,12 @@ void Config::initDefaults()
     set("Files/ADIF_Path", QCoreApplication::applicationDirPath() + "/log.adif");
     set("Files/CTY_Path", QCoreApplication::applicationDirPath() + "/data/cty.dat");
 
+    set("SessionLog/Attached", true);
+    set("SessionLog/X", 0);
+    set("SessionLog/Y", 0);
+    set("SessionLog/Width", 0);
+    set("SessionLog/Height", 0);
+
     for (int i = 1; i <= 8; ++i) {
         set(QString("Shortcuts/F%1_Title").arg(i), QString("F%1").arg(i));
         set(QString("Shortcuts/F%1_Content").arg(i), QString());

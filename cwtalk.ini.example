@@ -28,6 +28,14 @@ Send_Clear_Delay_Sec=2
 ADIF_Path=log.adif
 CTY_Path=data/cty.dat
 
+[SessionLog]
+; 当次日志浮动窗口：贴主窗口上方时 Attached=true，拖开后为 false 并记住 X/Y/Width/Height
+Attached=true
+X=0
+Y=0
+Width=0
+Height=0
+
 [Cat]
 Enabled=true
 Backend=yaesu

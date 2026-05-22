@@ -18,6 +18,7 @@ test.bat
 *.ilk
 *.exp
 *.zip
+.vscode/
 
 # qmake / MOC / UIC 生成文件（通常在 build/ 内，此处作兜底）
 .qmake.stash
