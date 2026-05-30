@@ -1,5 +1,13 @@
 #include "settingsdialog.h"
+#include <QTimeZone>
 #include "config.h"
+#include "mainwindow.h"
+#include "catreaderfactory.h"
+#include "icomcatreader.h"
+#include "icatreader.h"
+#include <QSerialPort>
+#include <QMessageBox>
+#include <QCloseEvent>
 
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -57,6 +65,12 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     root->addWidget(buttons);
 
     loadFromConfig();
+}
+
+SettingsDialog::~SettingsDialog()
+{
+    releaseKeyingTest();
+    resumeMainCatPolling();
 }
 
 void SettingsDialog::refreshSerialPortLists()
@@ -169,6 +183,19 @@ QWidget *SettingsDialog::makeHardwareTab()
     });
     catForm->addRow(QString(), refreshPortsBtn);
 
+    m_catTestBtn = new QPushButton(tr("测试读频"));
+    m_catTestFreqLabel = new QLabel(tr("—"));
+    m_catTestFreqLabel->setMinimumWidth(120);
+    m_catTestFreqLabel->setStyleSheet(
+        QStringLiteral("font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: #333;"));
+    auto *catTestRow = new QWidget;
+    auto *catTestLay = new QHBoxLayout(catTestRow);
+    catTestLay->setContentsMargins(0, 0, 0, 0);
+    catTestLay->addWidget(m_catTestBtn);
+    catTestLay->addWidget(m_catTestFreqLabel, 1);
+    connect(m_catTestBtn, &QPushButton::clicked, this, &SettingsDialog::onCatTestClicked);
+    catForm->addRow(QString(), catTestRow);
+
     auto *catHint = new QLabel(
         tr("Yaesu FT-710：USB「Enhanced COM Port (CAT-1)」，波特率与菜单 CAT-1 一致（默认 38400）。"
            "Icom IC-756PROIII：接 CI-V 口，菜单 CI-V Baud Rate 默认 19200，CI-V Address 默认 0x6E。"));
@@ -185,6 +212,11 @@ QWidget *SettingsDialog::makeHardwareTab()
     keyForm->addRow(tr("串口:"), m_keyingPort);
     keyForm->addRow(tr("控制线:"), m_keyingLine);
     keyForm->addRow(QString(), m_keyingActiveLow);
+
+    m_keyingTestBtn = new QPushButton(tr("测试键控"));
+    m_keyingTestBtn->setCheckable(true);
+    connect(m_keyingTestBtn, &QPushButton::toggled, this, &SettingsDialog::onKeyingTestToggled);
+    keyForm->addRow(QString(), m_keyingTestBtn);
 
     auto *panel = new QWidget;
     auto *lay = new QVBoxLayout(panel);
@@ -237,15 +269,21 @@ QWidget *SettingsDialog::makeOperationTab()
     m_sendClearDelay->setRange(0, 120);
     m_sendClearDelay->setSuffix(tr(" 秒"));
     m_sendClearDelay->setSpecialValueText(tr("关闭"));
+    m_timeZone = new QLineEdit;
+    m_timeZone->setPlaceholderText(tr("system"));
 
     form->addRow(tr("默认速度 WPM:"), m_defaultWpm);
+    form->addRow(tr("记日志时区:"), m_timeZone);
     // form->addRow(tr("CQ 报文模板:"), m_cqMessage);
     form->addRow(tr("CQ 循环间隔:"), m_cqInterval);
     form->addRow(tr("发完清空延迟:"), m_sendClearDelay);
 
     auto *hint = new QLabel(
         tr("发完清空：全部字符发送完成后，经过该时间自动清空发送框；0 为关闭。\n"
-           "CQ 报文模板为预留项，快捷键内容请使用宏变量。"));
+           "CQ 报文模板为预留项，快捷键内容请使用宏变量。\n"
+           "ADIF 的 qso_date/time_on/time_off 以 UTC 存储。记日志时区填 system 则跟随本机"
+           "（当前 %1）；也可填 IANA 名称如 Asia/Shanghai。")
+            .arg(QString::fromUtf8(QTimeZone::systemTimeZoneId())));
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color: #666; font-size: 11px;"));
 
@@ -345,6 +383,7 @@ void SettingsDialog::loadFromConfig()
     m_power->setValue(cfg.getInt("Station/Power", 100));
 
     m_defaultWpm->setValue(cfg.getInt("Operation/Default_WPM", 22));
+    m_timeZone->setText(cfg.getString("Operation/TimeZone", "system"));
     // m_cqMessage->setText(cfg.getString("Operation/CQ_Message", ""));
     m_cqInterval->setValue(cfg.getInt("Operation/CQ_Interval", 4));
     m_sendClearDelay->setValue(cfg.getInt("Operation/Send_Clear_Delay_Sec", 2));
@@ -383,6 +422,9 @@ void SettingsDialog::saveToConfig()
     cfg.set("Station/Power", m_power->value());
 
     cfg.set("Operation/Default_WPM", m_defaultWpm->value());
+    cfg.set("Operation/TimeZone", m_timeZone->text().trimmed().isEmpty()
+                                      ? QStringLiteral("system")
+                                      : m_timeZone->text().trimmed());
     // cfg.set("Operation/CQ_Message", m_cqMessage->text().trimmed());
     cfg.set("Operation/CQ_Interval", m_cqInterval->value());
     cfg.set("Operation/Send_Clear_Delay_Sec", m_sendClearDelay->value());
@@ -409,6 +451,238 @@ void SettingsDialog::onBrowseAdifPath()
 
 void SettingsDialog::onAccepted()
 {
+    releaseKeyingTest();
+    resumeMainCatPolling();
     saveToConfig();
     accept();
+}
+
+
+void SettingsDialog::applyKeyingOutput(bool on)
+{
+    QSerialPort *port = m_keyingTestPort;
+    if (!port || !port->isOpen())
+        return;
+
+    const QString line = m_keyingLine->currentText().trimmed().toUpper();
+    const bool activeLow = m_keyingActiveLow->isChecked();
+    const bool actual = activeLow ? !on : on;
+
+    if (line == QLatin1String("DTR"))
+        port->setDataTerminalReady(actual);
+    else
+        port->setRequestToSend(actual);
+}
+
+void SettingsDialog::resumeMainCatPolling()
+{
+    if (auto *mw = qobject_cast<MainWindow *>(parent()))
+        mw->resumeCatPollingIfIdle();
+}
+
+void SettingsDialog::releaseKeyingTest()
+{
+    if (m_keyingTestUsesMain) {
+        if (auto *mw = qobject_cast<MainWindow *>(parent()))
+            mw->releaseKeyingTest();
+        m_keyingTestUsesMain = false;
+    }
+
+    if (m_keyingTestPort) {
+        applyKeyingOutput(false);
+        if (m_keyingTestPort->isOpen())
+            m_keyingTestPort->close();
+        m_keyingTestPort->deleteLater();
+        m_keyingTestPort = nullptr;
+    }
+
+    if (m_keyingTestBtn) {
+        m_keyingTestBtn->blockSignals(true);
+        m_keyingTestBtn->setChecked(false);
+        m_keyingTestBtn->setText(tr("测试键控"));
+        m_keyingTestBtn->blockSignals(false);
+    }
+}
+
+bool SettingsDialog::startKeyingTest()
+{
+    const QString port = serialPortFromCombo(m_keyingPort);
+    if (port.isEmpty()) {
+        QMessageBox::warning(this, tr("键控测试"), tr("请选择键控串口。"));
+        return false;
+    }
+
+    const QString line = m_keyingLine->currentText().trimmed().toUpper();
+    const bool activeLow = m_keyingActiveLow->isChecked();
+
+    if (auto *mw = qobject_cast<MainWindow *>(parent())) {
+        if (mw->applyKeyingTest(true, port, line, activeLow)) {
+            m_keyingTestUsesMain = true;
+            return true;
+        }
+    }
+
+    releaseKeyingTest();
+    m_keyingTestUsesMain = false;
+
+    auto *serial = new QSerialPort(this);
+    serial->setPortName(port);
+    serial->setBaudRate(9600);
+    serial->setDataBits(QSerialPort::Data8);
+    serial->setParity(QSerialPort::NoParity);
+    serial->setStopBits(QSerialPort::OneStop);
+    serial->setFlowControl(QSerialPort::NoFlowControl);
+
+    if (!serial->open(QIODevice::ReadWrite)) {
+        QMessageBox::warning(
+            this, tr("键控测试"),
+            tr("无法打开串口 %1：%2").arg(port, serial->errorString()));
+        serial->deleteLater();
+        return false;
+    }
+
+    serial->setDataTerminalReady(false);
+    serial->setRequestToSend(false);
+    m_keyingTestPort = serial;
+    applyKeyingOutput(true);
+    return true;
+}
+
+void SettingsDialog::onKeyingTestToggled(bool checked)
+{
+    if (!checked) {
+        releaseKeyingTest();
+        return;
+    }
+
+    if (!startKeyingTest()) {
+        m_keyingTestBtn->blockSignals(true);
+        m_keyingTestBtn->setChecked(false);
+        m_keyingTestBtn->blockSignals(false);
+        return;
+    }
+
+    m_keyingTestBtn->setText(tr("放开键控"));
+}
+
+void SettingsDialog::reject()
+{
+    releaseKeyingTest();
+    resumeMainCatPolling();
+    QDialog::reject();
+}
+
+void SettingsDialog::closeEvent(QCloseEvent *event)
+{
+    releaseKeyingTest();
+    resumeMainCatPolling();
+    QDialog::closeEvent(event);
+}
+
+
+void SettingsDialog::onCatTestClicked()
+{
+    runCatFrequencyTest();
+}
+
+void SettingsDialog::runCatFrequencyTest()
+{
+    // 仅 readOnce() 单次读频，不调用 startPolling()
+
+    if (!m_catTestBtn || !m_catTestFreqLabel)
+        return;
+
+    const QString port = serialPortFromCombo(m_catPort);
+    if (port.isEmpty()) {
+        QMessageBox::warning(this, tr("CAT 测试"), tr("请选择 CAT 串口。"));
+        return;
+    }
+
+    const QString backend = m_catBackend->currentData().toString();
+    const QString backendKey = backend.trimmed().toLower();
+    const bool knownBackend = backendKey == QLatin1String("yaesu")
+        || backendKey == QLatin1String("yaesu_ft710")
+        || backendKey == QLatin1String("ft710")
+        || backendKey.startsWith(QLatin1String("icom"))
+        || backendKey.startsWith(QLatin1String("ic756"));
+    if (!knownBackend) {
+        QMessageBox::warning(this, tr("CAT 测试"), tr("不支持的 CAT 协议。"));
+        return;
+    }
+
+    bool okBaud = false;
+    const int baud = m_catBaud->currentText().trimmed().toInt(&okBaud);
+    if (!okBaud || baud <= 0) {
+        QMessageBox::warning(this, tr("CAT 测试"), tr("请填写有效波特率。"));
+        return;
+    }
+
+    m_catTestBtn->setEnabled(false);
+    m_catTestFreqLabel->setText(tr("读频中…"));
+
+    if (auto *mw = qobject_cast<MainWindow *>(parent())) {
+        double mhz = 0.0;
+        QString err;
+        bool success = false;
+        if (mw->readCatFrequencyTest(port, backend, m_catAddress->value(), mhz, err, success)) {
+            if (success) {
+                m_catTestFreqLabel->setText(
+                    QStringLiteral("%1 MHz").arg(mhz, 0, 'f', 3));
+            } else {
+                m_catTestFreqLabel->setText(err.isEmpty() ? tr("读频失败") : err);
+                if (!err.isEmpty()) {
+                    QMessageBox::warning(this, tr("CAT 测试"), err);
+                }
+            }
+            m_catTestBtn->setEnabled(true);
+            return;
+        }
+    }
+
+    QSerialPort serial;
+    serial.setPortName(port);
+    serial.setBaudRate(baud);
+    serial.setDataBits(QSerialPort::Data8);
+    serial.setParity(QSerialPort::NoParity);
+    serial.setStopBits(QSerialPort::OneStop);
+    serial.setFlowControl(QSerialPort::NoFlowControl);
+
+    if (!serial.open(QIODevice::ReadWrite)) {
+        m_catTestFreqLabel->setText(tr("打开串口失败"));
+        QMessageBox::warning(
+            this, tr("CAT 测试"),
+            tr("无法打开串口 %1：%2").arg(port, serial.errorString()));
+        m_catTestBtn->setEnabled(true);
+        return;
+    }
+
+    ICatReader *reader = CatReaderFactory::createForBackend(backend, this);
+    if (!reader) {
+        m_catTestFreqLabel->setText(tr("协议错误"));
+        serial.close();
+        m_catTestBtn->setEnabled(true);
+        return;
+    }
+    reader->setSerialPort(&serial);
+    if (auto *icom = dynamic_cast<IcomCatReader *>(reader))
+        icom->setRadioAddress(static_cast<quint8>(m_catAddress->value() & 0xFF));
+
+    QString resultText;
+    if (!reader->open()) {
+        resultText = reader->lastError();
+    } else if (!reader->readOnce()) {
+        resultText = reader->lastError();
+        if (resultText.isEmpty())
+            resultText = tr("读频失败");
+    } else {
+        resultText = QStringLiteral("%1 MHz")
+                         .arg(reader->frequencyMHz(), 0, 'f', 3);
+    }
+
+    reader->close();
+    delete reader;
+    serial.close();
+
+    m_catTestFreqLabel->setText(resultText);
+    m_catTestBtn->setEnabled(true);
 }

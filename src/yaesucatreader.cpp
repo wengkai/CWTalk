@@ -216,6 +216,15 @@ void YaesuCatReader::setFrequency(double mhz)
     emit frequencyChanged(m_freqMHz);
 }
 
+bool YaesuCatReader::readOnce()
+{
+    const bool wasSuspended = m_pollSuspended;
+    m_pollSuspended = false;
+    const bool ok = readOperatingFrequency();
+    m_pollSuspended = wasSuspended;
+    return ok;
+}
+
 void YaesuCatReader::onPollTimer()
 {
     if (!isOpen() || m_pollSuspended)

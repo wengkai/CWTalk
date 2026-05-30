@@ -17,11 +17,15 @@
 #include "icomcatreader.h"
 #include "qsolog.h"
 #include "callsignprefixdb.h"
+#include "adiftime.h"
 #include "sessionlogwindow.h"
 #include "qsorecordformat.h"
 #include "adif/record.h"
 
 #include <QApplication>
+#include <QListWidget>
+#include <QAbstractSpinBox>
+#include <QDialog>
 #include <QMessageBox>
 #include <QEventLoop>
 #include <QDateTime>
@@ -87,12 +91,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     loadAdifLog();
     initHardware();
     initSessionLogWindow();
+    qApp->installEventFilter(this);
     setWindowTitle("CWTalk - 日常 CW 通联");
     resize(1020, 180);
 }
 
 MainWindow::~MainWindow()
 {
+    qApp->removeEventFilter(this);
     if (m_sessionLog)
         m_sessionLog->saveGeometryToConfig();
     shutdownHardware();
@@ -287,6 +293,7 @@ void MainWindow::setupUI()
         QRegularExpression(QStringLiteral("^\\d{0,3}$")), this));
     m_rstSent->installEventFilter(this);
     m_rstRcvd->installEventFilter(this);
+    m_callsign->installEventFilter(this);
     connect(m_freqEdit, &QLineEdit::editingFinished,
             this, &MainWindow::onManualFrequencyEdited);
 
@@ -485,6 +492,8 @@ void MainWindow::setupUI()
             this, &MainWindow::onCallsignChanged);
     connect(m_callsign, &QLineEdit::editingFinished,
             this, &MainWindow::onCallsignEditingFinished);
+    connect(m_rstSent, &QLineEdit::textChanged,
+            this, &MainWindow::onRstSentChanged);
     
             // 修改：输入框变化时传递给 Keyer
     connect(m_sendInput, &QTextEdit::textChanged, 
@@ -559,9 +568,152 @@ void MainWindow::setupUI()
 void MainWindow::onOpenSettings()
 {
     SettingsDialog dlg(this);
-    if (dlg.exec() != QDialog::Accepted)
+    const int r = dlg.exec();
+    if (r == QDialog::Accepted)
+        applySettingsFromConfig();
+    else
+        resumeCatPollingIfIdle();
+}
+
+
+bool MainWindow::applyKeyingTest(bool on, const QString &port, const QString &line, bool activeLow)
+{
+    if (on && m_keyer && m_keyer->isSending())
+        return false;
+
+    auto *pcKeyer = dynamic_cast<PCKeyer *>(m_keyer);
+    if (!pcKeyer || !m_keyingSerial || !m_keyingSerial->isOpen())
+        return false;
+    if (m_keyingSerial->portName().compare(port.trimmed(), Qt::CaseInsensitive) != 0)
+        return false;
+
+    pcKeyer->setKeyingLine(line.trimmed().toUpper());
+    pcKeyer->setActiveLow(activeLow);
+    pcKeyer->setPttTest(on);
+    m_keyingTestHeld = on;
+    if (on && m_catReader && m_catActive) {
+        m_catReader->stopPolling();
+        m_catPollPausedForTx = true;
+    }
+    syncCatPollingWithKeyer();
+    return true;
+}
+
+void MainWindow::releaseKeyingTest()
+{
+    if (!m_keyingTestHeld)
         return;
-    applySettingsFromConfig();
+    if (auto *pcKeyer = dynamic_cast<PCKeyer *>(m_keyer))
+        pcKeyer->setPttTest(false);
+    m_keyingTestHeld = false;
+    syncCatPollingWithKeyer();
+    resumeCatPollingIfIdle();
+}
+
+bool MainWindow::readCatFrequencyTest(const QString &port, const QString &backend, int civAddr,
+                                      double &mhzOut, QString &errorOut, bool &successOut)
+{
+    successOut = false;
+    errorOut.clear();
+    mhzOut = 0.0;
+
+    auto portMatches = [&](QSerialPort *serial) -> bool {
+        return serial && serial->isOpen()
+               && serial->portName().compare(port.trimmed(), Qt::CaseInsensitive) == 0;
+    };
+
+    QSerialPort *serial = nullptr;
+    if (portMatches(m_catSerial))
+        serial = m_catSerial;
+    else if (portMatches(m_keyingSerial))
+        serial = m_keyingSerial;
+    else
+        return false;
+
+    const bool pollWasActive = m_catReader && m_catActive;
+    if (m_catReader) {
+        m_catReader->stopPolling();
+        if (pollWasActive)
+            m_catPollPausedForTx = true;
+    }
+
+    auto releaseKeyingForCat = [this]() {
+        if (m_keyingTestHeld)
+            return;
+        if (auto *pcKeyer = dynamic_cast<PCKeyer *>(m_keyer))
+            pcKeyer->releaseKeyingLines();
+    };
+    releaseKeyingForCat();
+
+    auto attachSharedHook = [this, releaseKeyingForCat](ICatReader *reader) {
+        if (!m_serialPortsShared)
+            return;
+        if (auto *yaesu = dynamic_cast<YaesuCatReader *>(reader)) {
+            yaesu->setBeforeTransaction(releaseKeyingForCat);
+        } else if (auto *icom = dynamic_cast<IcomCatReader *>(reader)) {
+            icom->setBeforeTransaction(releaseKeyingForCat);
+        }
+    };
+
+    auto backendMatches = [](ICatReader *reader, const QString &be) -> bool {
+        if (!reader)
+            return false;
+        const QString b = be.trimmed().toLower();
+        if (dynamic_cast<IcomCatReader *>(reader))
+            return b.startsWith(QStringLiteral("icom")) || b.startsWith(QStringLiteral("ic756"));
+        if (dynamic_cast<YaesuCatReader *>(reader))
+            return b == QStringLiteral("yaesu") || b == QStringLiteral("yaesu_ft710")
+                   || b == QStringLiteral("ft710");
+        return false;
+    };
+
+    ICatReader *reader = nullptr;
+    ICatReader *tempReader = nullptr;
+    if (m_catReader && backendMatches(m_catReader, backend))
+        reader = m_catReader;
+    else {
+        tempReader = CatReaderFactory::createForBackend(backend, this);
+        if (!tempReader) {
+            errorOut = tr("不支持的 CAT 协议");
+            return true;
+        }
+        reader = tempReader;
+        reader->setSerialPort(serial);
+        attachSharedHook(reader);
+        if (auto *icom = dynamic_cast<IcomCatReader *>(reader))
+            icom->setRadioAddress(static_cast<quint8>(civAddr & 0xFF));
+        if (!reader->open()) {
+            errorOut = reader->lastError();
+            delete tempReader;
+            return true;
+        }
+    }
+
+    const quint8 configAddr =
+        static_cast<quint8>(theConfig.getInt("Hardware/CAT_Address", 0x6E) & 0xFF);
+    if (reader == m_catReader) {
+        if (auto *icom = dynamic_cast<IcomCatReader *>(reader))
+            icom->setRadioAddress(static_cast<quint8>(civAddr & 0xFF));
+    }
+
+    successOut = reader->readOnce();
+    if (successOut) {
+        mhzOut = reader->frequencyMHz();
+    } else {
+        errorOut = reader->lastError();
+        if (errorOut.isEmpty())
+            errorOut = tr("读频失败");
+    }
+
+    if (reader == m_catReader) {
+        if (auto *icom = dynamic_cast<IcomCatReader *>(reader))
+            icom->setRadioAddress(configAddr);
+    } else {
+        tempReader->close();
+        delete tempReader;
+    }
+
+    return true;
 }
 
 void MainWindow::refreshShortcutButtonLabels()
@@ -588,6 +740,8 @@ void MainWindow::resumeCatPollingIfIdle()
         return;
     if (m_keyer && m_keyer->isSending())
         return;
+    if (m_keyingTestHeld)
+        return;
     if (!m_catPollPausedForTx)
         return;
 
@@ -601,7 +755,7 @@ void MainWindow::syncCatPollingWithKeyer()
     if (!m_catReader || !m_catActive)
         return;
 
-    if (m_keyer && m_keyer->isSending()) {
+    if ((m_keyer && m_keyer->isSending()) || m_keyingTestHeld) {
         if (!m_catPollPausedForTx) {
             m_catReader->stopPolling();
             m_catPollPausedForTx = true;
@@ -622,6 +776,45 @@ void MainWindow::applyWpmToKeyer(int wpm)
 void MainWindow::onWpmChanged(int wpm)
 {
     applyWpmToKeyer(wpm);
+}
+
+void MainWindow::adjustWpm(int delta)
+{
+    if (!m_wpmSpin || delta == 0)
+        return;
+    const int next = qBound(m_wpmSpin->minimum(), m_wpmSpin->value() + delta,
+                            m_wpmSpin->maximum());
+    if (next != m_wpmSpin->value())
+        m_wpmSpin->setValue(next);
+}
+
+bool MainWindow::shouldArrowKeysAdjustWpm(QObject *watched) const
+{
+    if (!watched || m_qsoEditMode)
+        return false;
+    if (watched == m_sendInput || watched == m_sendInput->viewport())
+        return false;
+    if (watched == m_wpmSpin)
+        return false;
+
+    if (m_sessionLog) {
+        if (auto *w = qobject_cast<QWidget *>(watched)) {
+            if (w->window() == m_sessionLog || m_sessionLog->isAncestorOf(w))
+                return false;
+        }
+    }
+
+    for (QWidget *w = qobject_cast<QWidget *>(watched); w; w = w->parentWidget()) {
+        if (qobject_cast<QDialog *>(w))
+            return false;
+        if (qobject_cast<QListWidget *>(w))
+            return false;
+        if (qobject_cast<QAbstractSpinBox *>(w))
+            return false;
+        if (qobject_cast<QTextEdit *>(w))
+            return false;
+    }
+    return true;
 }
 
 void MainWindow::applySettingsFromConfig()
@@ -791,8 +984,6 @@ void MainWindow::onManualFrequencyEdited()
         return;
     const double mhz = parseFrequencyMHz(m_freqEdit->text());
     if (mhz > 0.0) {
-        if (m_manualFreqMHz > 0.0 && qAbs(mhz - m_manualFreqMHz) > 0.0005)
-            clearQsoFieldsOnly();
         m_manualFreqMHz = mhz;
         m_freqEdit->setText(formatFrequencyMHz(mhz));
     }
@@ -909,6 +1100,19 @@ void MainWindow::onCallsignEditingFinished()
         return;
     }
     showQsoHistoryForCall(c);
+}
+
+void MainWindow::onRstSentChanged(const QString &text)
+{
+    if (m_qsoEditMode)
+        return;
+
+    if (text.trimmed().isEmpty()) {
+        m_qsoTimeOn = QDateTime();
+        return;
+    }
+    if (!m_qsoTimeOn.isValid())
+        m_qsoTimeOn = AdifTime::wallClockNow();
 }
 
 void MainWindow::setQsoFieldsFaded(bool faded)
@@ -1046,12 +1250,17 @@ adif::Record MainWindow::buildQsoRecordFromUi()
         rec.set_field("time_on", m_editingOriginalRecord.get_field("time_on"));
         rec.set_field("time_off", m_editingOriginalRecord.get_field("time_off"));
     } else {
-        const QDateTime timeOff = QDateTime::currentDateTime();
+        const QDateTime timeOff = AdifTime::wallClockNow();
         if (!m_qsoTimeOn.isValid())
             m_qsoTimeOn = timeOff;
-        rec.set_field("qso_date", m_qsoTimeOn.toString("yyyyMMdd").toStdString());
-        rec.set_field("time_on", m_qsoTimeOn.toString("HHmmss").toStdString());
-        rec.set_field("time_off", timeOff.toString("HHmmss").toStdString());
+        QString qsoDate;
+        QString timeOn;
+        QString timeOffStr;
+        AdifTime::adifUtcFields(m_qsoTimeOn, &qsoDate, &timeOn);
+        AdifTime::adifUtcFields(timeOff, nullptr, &timeOffStr);
+        rec.set_field("qso_date", qsoDate.toStdString());
+        rec.set_field("time_on", timeOn.toStdString());
+        rec.set_field("time_off", timeOffStr.toStdString());
     }
 
     const double mhz = currentFrequencyMHz();
@@ -1091,6 +1300,10 @@ adif::Record MainWindow::buildQsoRecordFromUi()
         if (!myRig.isEmpty())
             rec.set_field("my_rig", myRig.toStdString());
     }
+
+    const int txPwr = theConfig.getInt(QStringLiteral("Station/Power"), 0);
+    if (txPwr > 0)
+        rec.set_field("tx_pwr", QString::number(txPwr).toStdString());
 
     return rec;
 }
@@ -1575,16 +1788,51 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
-        if (ke->key() == Qt::Key_Tab && ke->modifiers() == Qt::NoModifier) {
-            if (watched == m_rstSent && m_rstSent->text().trimmed().isEmpty()) {
-                m_rstSent->setText(QStringLiteral("599"));
-                m_rstRcvd->setFocus();
+        if (ke->modifiers() == Qt::NoModifier
+            && (ke->key() == Qt::Key_Up || ke->key() == Qt::Key_Down)
+            && shouldArrowKeysAdjustWpm(watched)) {
+            adjustWpm(ke->key() == Qt::Key_Up ? 1 : -1);
+            return true;
+        }
+
+        QLineEdit *qsoField = nullptr;
+        if (watched == m_callsign)
+            qsoField = m_callsign;
+        else if (watched == m_rstSent)
+            qsoField = m_rstSent;
+        else if (watched == m_rstRcvd)
+            qsoField = m_rstRcvd;
+
+        if (qsoField && ke->modifiers() == Qt::NoModifier) {
+            const auto advanceQsoField = [this](QLineEdit *field) {
+                if (field == m_rstSent && field->text().trimmed().isEmpty()) {
+                    field->setText(QStringLiteral("599"));
+                    m_rstRcvd->setFocus();
+                    return;
+                }
+                if (field == m_rstRcvd && field->text().trimmed().isEmpty()) {
+                    field->setText(QStringLiteral("599"));
+                    m_name->setFocus();
+                    return;
+                }
+                if (field == m_callsign)
+                    m_rstSent->setFocus();
+                else if (field == m_rstSent)
+                    m_rstRcvd->setFocus();
+                else if (field == m_rstRcvd)
+                    m_name->setFocus();
+            };
+
+            if (ke->key() == Qt::Key_Space) {
+                advanceQsoField(qsoField);
                 return true;
             }
-            if (watched == m_rstRcvd && m_rstRcvd->text().trimmed().isEmpty()) {
-                m_rstRcvd->setText(QStringLiteral("599"));
-                m_name->setFocus();
-                return true;
+
+            if (ke->key() == Qt::Key_Tab) {
+                if (qsoField == m_rstSent || qsoField == m_rstRcvd) {
+                    advanceQsoField(qsoField);
+                    return true;
+                }
             }
         }
     }
@@ -1821,9 +2069,6 @@ void MainWindow::onCallsignChanged(const QString & /*text*/)
         );
         return;
     }
-
-    if (!m_qsoTimeOn.isValid())
-        m_qsoTimeOn = QDateTime::currentDateTime();
 
     QString country = tr("未知");
     int cqZone = 0;

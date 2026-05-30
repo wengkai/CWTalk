@@ -5,6 +5,28 @@
 #include <sstream> //  istringstream
 #include <ctime>   //  gmtime
 
+#ifdef _WIN32
+#include <time.h>
+#else
+#include <time.h>
+#endif
+
+namespace {
+std::time_t parseAdifUtcTimestamp(const std::string &dateTime)
+{
+    std::tm t{};
+    std::istringstream ss(dateTime);
+    ss >> std::get_time(&t, "%Y%m%d%H%M%S");
+    if (ss.fail())
+        throw std::runtime_error{"failed to parse time string"};
+#if defined(_WIN32)
+    return _mkgmtime(&t);
+#else
+    return timegm(&t);
+#endif
+}
+} // namespace
+
 using namespace std;
 
 // The least fileds that a record must have
@@ -247,15 +269,7 @@ string adif::Record::to_string() const
 
 std::time_t adif::Record::time_stamp() const
 {
-    // setenv("TZ", "/usr/share/zoneinfo/Europe/London", 1);
-    std::tm t{};
-    std::istringstream ss(date_time());
-    ss >> std::get_time(&t, "%Y%m%d%H%M%S");
-    if (ss.fail())
-    {
-        throw std::runtime_error{"failed to parse time string"};
-    }
-    return mktime(&t)+28800;    //  8 hours to UTC
+    return parseAdifUtcTimestamp(date_time());
 }
 
 

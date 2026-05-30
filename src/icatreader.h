@@ -27,6 +27,8 @@ public:
     virtual void startPolling(int intervalMs = 800) = 0;
     virtual void stopPolling() = 0;
 
+    virtual bool readOnce() { return false; }
+
     // 同口共享时：正在执行读频事务（VS/FA），上层应暂缓启动新的发射
     virtual bool isFrequencyQueryActive() const { return false; }
 

@@ -31,6 +31,8 @@ public:
 
     void setBeforeTransaction(std::function<void()> hook) { m_beforeTransaction = std::move(hook); }
 
+    bool readOnce() override;
+
 private slots:
     void onPollTimer();
 

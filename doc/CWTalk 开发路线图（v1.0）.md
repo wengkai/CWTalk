@@ -2,7 +2,7 @@
 
 **总原则：** 先跑通数据流，再 polish 界面；先单机模拟，再连硬件；先核心路径，再边缘功能。
 
-**文档更新**：2026-05-21 — 进度快照见下表；当日明细见 `CWTalk 开发日志.md`；需求基线见 `CWTalk 需求文档（正式版 v1.5）.md`。
+**文档更新**：2026-05-21 — 含 UTC 记日志、Icom CAT、设置测试读频/键控、日志窗磁吸贴回；明细见开发日志。
 
 ### 当前进度快照（2026-05-21）
 
@@ -14,8 +14,8 @@
 | 2 | M3 界面原型 | ✅ | 主布局、选项、齿轮入口 |
 | 3 | M4 摩尔斯引擎 | ✅ | PCKeyer、WPM、`[` `]` 提速；发完后续发 |
 | 4 | M5 硬件 Keying | ✅ | DTR/RTS，极性可配 |
-| 5 | M6 CAT 读频 | 🟡 | Yaesu + Icom IC-756PROIII CI-V；缺 BAND 推导 |
-| 6 | M7 功能闭环 | 🟡 | CQ 循环、宏、记录、当次日志、Alt 插入 |
+| 5 | M6 CAT 读频 | 🟡 | Yaesu + Icom CI-V；`readOnce` 测试读频；缺 BAND 推导 |
+| 6 | M7 功能闭环 | 🟡 | 记录、当次日志编辑、UTC、设置内硬件测试、日志窗贴回 |
 | 7 | M8 发布 | 🟡 | README、gitignore、待 LICENSE |
 | — | 开源仓库 | ✅ | GitHub `wengkai/CWTalk` |
 
@@ -160,6 +160,8 @@
 | Bug 修复 |                           |
 
 **里程碑 M8：v1.0 正式发布**
+
+**2026-05-21 补充：** ADIF UTC + `Operation/TimeZone`；Icom IC-756PROIII；设置「测试读频/测试键控」；仅 CAT 变频清 QSO；呼号/RST 空格跳格；当次日志窗磁吸贴回（24px）。
 
 **2026-05-16 补充（开源准备）：** `README.md`、`.gitignore`、`cwtalk.ini.example`、`doc/开发日志.md`、需求文档 v1.3；GitHub 发布待用户建远程仓库并选定 LICENSE。
 

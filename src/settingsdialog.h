@@ -8,6 +8,10 @@ class QSpinBox;
 class QComboBox;
 class QCheckBox;
 class QTableWidget;
+class QPushButton;
+class QSerialPort;
+class QCloseEvent;
+class QLabel;
 
 class SettingsDialog : public QDialog
 {
@@ -15,10 +19,17 @@ class SettingsDialog : public QDialog
 
 public:
     explicit SettingsDialog(QWidget *parent = nullptr);
+    ~SettingsDialog() override;
+
+protected:
+    void reject() override;
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void onBrowseAdifPath();
     void onAccepted();
+    void onKeyingTestToggled(bool checked);
+    void onCatTestClicked();
 
 private:
     void loadFromConfig();
@@ -27,6 +38,11 @@ private:
     void populateSerialPortCombo(QComboBox *combo, const QString &selectedPort);
     QString serialPortFromCombo(const QComboBox *combo) const;
     void updateCatControlsEnabled();
+    void releaseKeyingTest();
+    void resumeMainCatPolling();
+    bool startKeyingTest();
+    void applyKeyingOutput(bool on);
+    void runCatFrequencyTest();
 
     QWidget *makeHardwareTab();
     QWidget *makeStationTab();
@@ -41,9 +57,14 @@ private:
     QComboBox *m_keyingPort = nullptr;
     QComboBox *m_keyingLine = nullptr;
     QCheckBox *m_keyingActiveLow = nullptr;
+    QPushButton *m_keyingTestBtn = nullptr;
+    QSerialPort *m_keyingTestPort = nullptr;
+    bool m_keyingTestUsesMain = false;
     QCheckBox *m_catEnabled = nullptr;
     QComboBox *m_catBackend = nullptr;
     QSpinBox *m_catPollMs = nullptr;
+    QPushButton *m_catTestBtn = nullptr;
+    QLabel *m_catTestFreqLabel = nullptr;
 
     // Station
     QLineEdit *m_myCall = nullptr;
@@ -55,6 +76,7 @@ private:
 
     // Operation
     QSpinBox *m_defaultWpm = nullptr;
+    QLineEdit *m_timeZone = nullptr;
     // QLineEdit *m_cqMessage = nullptr;
     QSpinBox *m_cqInterval = nullptr;
     QSpinBox *m_sendClearDelay = nullptr;

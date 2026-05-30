@@ -229,7 +229,14 @@ void PCKeyer::setWpm(int wpm)
 void PCKeyer::releaseKeyingLines()
 {
     m_timer->stop();
-    setKey(false);
+    if (!m_pttTestActive)
+        setKey(false);
+}
+
+void PCKeyer::setPttTest(bool on)
+{
+    m_pttTestActive = on;
+    setKey(on);
 }
 
 void PCKeyer::setKey(bool on)

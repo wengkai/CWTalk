@@ -20,6 +20,8 @@ Power=100
 
 [Operation]
 Default_WPM=22
+TimeZone=system
+; ADIF 时间以 UTC 写入；system=跟随 Windows 时区，或填 Asia/Shanghai 等 IANA 名称
 CQ_Interval=4
 Send_Clear_Delay_Sec=2
 

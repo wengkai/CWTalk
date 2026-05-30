@@ -19,3 +19,16 @@ ICatReader *CatReaderFactory::create(QObject *parent)
 
     return nullptr;
 }
+
+ICatReader *CatReaderFactory::createForBackend(const QString &backend, QObject *parent)
+{
+    const QString b = backend.trimmed().toLower();
+    if (b == "yaesu" || b == "yaesu_ft710" || b == "ft710")
+        return new YaesuCatReader(parent);
+
+    if (b == "icom_ic756pro3" || b == "icom_ic756proiii"
+        || b == "icom" || b == "ic756pro3")
+        return new IcomCatReader(parent);
+
+    return nullptr;
+}

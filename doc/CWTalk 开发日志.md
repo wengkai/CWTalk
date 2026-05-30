@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-05-21 — UTC 记日志、设置测试、通联交互与日志窗贴回
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| ADIF 时间 UTC | `qso_date` / `time_on` / `time_off` 按 **UTC** 写入；`AdifTime`（`adiftime.cpp`）将台站「墙钟」换算为 UTC |
+| 记日志时区 | 选项「操作」：`Operation/TimeZone`，默认 `system`（本机时区），或 IANA 如 `Asia/Shanghai` |
+| 空格跳格 | 呼号 / 发送 RST / 接收 RST：按 **空格** 等同 Tab 跳到下一框；RST 空时仍自动填 `599` |
+| 手动改频 | 频率框失焦仅格式化 MHz，**不再**清空通联六框；**仅 CAT 读频变化**时 `clearQsoFieldsOnly()` |
+| 设置 · 测试读频 | CAT 页「测试读频」：优先复用主窗口已开串口 `readCatFrequencyTest()`，否则临时串口 **`readOnce()` 单次读频**，不启动轮询；关设置窗后 `resumeCatPollingIfIdle()` |
+| 设置 · 测试键控 | 键控页「测试键控」：按下 PTT、再按松开；测试期间暂停 CAT 轮询，`PCKeyer::setPttTest` 避免 `releaseKeyingLines` 误松开 |
+| 日志窗贴回 | 当次日志拖离后，下缘与主窗口上缘相距 ≤ **24px** 时自动 `Attached` 并 `syncAttachedGeometry()`；贴回后随主窗 `move`/`resize` 移动 |
+| Icom 读频 | `IcomCatReader` + `readOnce()`；`Cat/Backend=icom_ic756pro3`，默认 CI-V **0x6E**、建议 **19200** |
+
+### 主要新增/修改文件
+
+```
+src/adiftime.cpp / .h
+src/icomcatreader.cpp / .h
+src/catreaderfactory.cpp
+src/icatreader.h（readOnce）
+src/yaesucatreader.cpp（readOnce）
+src/sessionlogwindow.cpp / .h（trySnapToMainWindow）
+src/mainwindow.cpp / .h（UTC、空格跳格、手动改频、CAT/键控测试）
+src/settingsdialog.cpp
+src/pckeyer.cpp / .h（setPttTest）
+src/config.cpp
+cwtalk.ini.example
+```
+
+---
+
 ## 2026-05-21 — 当次日志窗口与 ADIF 编辑
 
 ### 已完成

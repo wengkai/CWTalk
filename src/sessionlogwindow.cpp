@@ -13,6 +13,10 @@
 #include <QResizeEvent>
 #include <QCloseEvent>
 
+namespace {
+constexpr int kSnapAttachPixels = 24;
+}
+
 SessionLogWindow::SessionLogWindow(QWidget *parent)
     : QWidget(parent, Qt::Tool | Qt::WindowTitleHint | Qt::WindowMinimizeButtonHint
                     | Qt::WindowCloseButtonHint)
@@ -89,6 +93,21 @@ void SessionLogWindow::syncAttachedGeometry()
     m_syncingGeometry = false;
 }
 
+void SessionLogWindow::trySnapToMainWindow()
+{
+    if (m_attached || m_syncingGeometry || !m_mainWindow || !m_mainWindow->isVisible())
+        return;
+
+    const QRect logFrame = frameGeometry();
+    const QRect mainFrame = m_mainWindow->frameGeometry();
+    const int gap = mainFrame.top() - logFrame.bottom();
+    if (qAbs(gap) > kSnapAttachPixels)
+        return;
+
+    m_attached = true;
+    syncAttachedGeometry();
+}
+
 void SessionLogWindow::appendRecord(const adif::Record &rec)
 {
     m_records.push_back(rec);
@@ -157,8 +176,11 @@ void SessionLogWindow::moveEvent(QMoveEvent *event)
     QWidget::moveEvent(event);
     if (m_syncingGeometry)
         return;
+    const bool wasAttached = m_attached;
     if (m_attached)
         m_attached = false;
+    if (!wasAttached)
+        trySnapToMainWindow();
     saveGeometryToConfig();
 }
 
@@ -167,8 +189,11 @@ void SessionLogWindow::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
     if (m_syncingGeometry)
         return;
+    const bool wasAttached = m_attached;
     if (m_attached)
         m_attached = false;
+    if (!wasAttached)
+        trySnapToMainWindow();
     saveGeometryToConfig();
 }
 

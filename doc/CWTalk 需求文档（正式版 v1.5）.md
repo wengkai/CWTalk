@@ -2,9 +2,9 @@
 
 **版本**：v1.5  
 **日期**：2026-05-21  
-**状态**：与当前代码实现对齐（含当次日志窗、ADIF 编辑/删除、记日志与淡色呼号修复）  
+**状态**：与当前代码实现对齐（含当次日志、UTC 记日志、Icom CAT、设置内 CAT/键控测试、日志窗磁吸贴回）  
 
-**相对 v1.4 的主要变更**：当次日志浮动窗；双击编辑/右键删除 ADIF；`QsoLog` 等长原地写盘；记日志必填项与频率解析修复；淡色呼号键入清除修复。
+**相对 v1.4 的主要变更**：当次日志浮动窗与编辑/删除；`QsoLog` 等长原地写盘；记日志与淡色呼号修复；**ADIF 时间 UTC** 与 `Operation/TimeZone`；Icom CI-V；仅 CAT 变频清 QSO；设置页测试读频/测试键控；日志窗拖回主窗上缘自动贴附。
 
 **工作摘要**：见 `doc/CWTalk 开发日志.md`（2026-05-21）。
 
@@ -44,7 +44,7 @@
 - **键控发射期间暂停 CAT 轮询**（`PCKeyer::transmissionActiveChanged`），避免半双工口冲突；发射结束恢复
 - **CAT 与 Keying 同口**时：每次 CAT 事务前 `releaseKeyingLines()` 释放 DTR/RTS
 - 读频成功时频率框只读并高亮；失败或未启用时可手动输入 MHz
-- **频率变化**（CAT 或手动确认后变化）：**自动清除当前 QSO 字段**（频率保留在频率框）
+- **频率变化**（**仅 CAT 读频**变化，与上次相差 >0.0005 MHz）：**自动清除当前 QSO 字段**（频率保留在频率框）；手动改频失焦仅格式化，不清通联区
 
 ### 2.2 Keying 接口（写）
 
@@ -122,9 +122,9 @@
 | ADIF 字段  | 来源                         | 说明 |
 | ---------- | ---------------------------- | ---- |
 | CALL       | 呼号框（自动大写）           | 必填 |
-| QSO_DATE   | `time_on` 对应 UTC 日期      | YYYYMMDD |
-| TIME_ON    | **首次在呼号框输入**时记下     | HHMMSS（6 位，无分隔符） |
-| TIME_OFF   | 点击「记录」时               | HHMMSS |
+| QSO_DATE   | `time_on` 对应 **UTC** 日期  | YYYYMMDD |
+| TIME_ON    | **首次在呼号框输入**时记下（台站时区墙钟 → UTC） | HHMMSS（6 位，UTC） |
+| TIME_OFF   | 点击「记录」时（同上换算 UTC） | HHMMSS |
 | FREQ       | 频率框 / CAT                 | **MHz**，三位小数（符合 ADIF 3.1.4 Megahertz）；旧日志若误存为 ≥1000 的整数 kHz，读入时自动 ÷1000 |
 | MODE       | 固定                         | `CW` |
 | RST_SENT   | 发送 RST；空则记 `599`       | 最多 3 位数字 |
@@ -147,7 +147,7 @@
 | ---- | ---- |
 | **数据范围** | 仅本次启动后成功写入 ADIF 的记录（非全文件浏览） |
 | **出现时机** | 第一条记录成功后自动显示；关闭按钮仅隐藏窗口 |
-| **布局** | 默认贴主窗口上方、与主窗同宽（约 5 行高，可滚动）；拖离后独立位置/大小；主窗最小化时一并最小化 |
+| **布局** | 默认贴主窗口上方、与主窗同宽（约 5 行高，可滚动）；拖离后独立位置/大小；**拖回**时日志窗下缘距主窗上缘 ≤24px 自动贴回并随主窗移动；主窗最小化时一并最小化 |
 | **行格式** | 逗号分隔九段：`qso_date, time_on, freq, call, rst_sent, rst_rcvd, name, qth, comment`（空段保留逗号）；`freq` MHz 三位小数；`time_on` 6 位 |
 | **排序** | 时间正序，**最新在列表底部**，新记录自动滚到底 |
 | **右键** | 删除记录（二次确认，从 ADIF 文件永久删除，不可恢复） |
@@ -205,9 +205,9 @@
 | **发报速度**        | **已实现**：发送行 WPM 控件即时生效；`[` `]` 段 1.5× 提速 |
 | **选项**            | **已实现**：信息行右侧齿轮按钮；无菜单栏 |
 | **呼号格式**        | **已实现**：输入过程自动转大写 |
-| **RST 输入**        | **已实现**：仅 0–3 位数字；**Tab** 时若发送/接收 RST 为空则填 `599` 并跳到下一项 |
-| **频率**            | **已实现**：MHz 三位小数；CAT 连接时只读；手动改频失焦后若与上次不同亦清除 QSO |
-| **频率变化**（CAT） | **已实现**：清除呼号/RST/姓名/QTH/备注（**不清频率**） |
+| **RST 输入**        | **已实现**：仅 0–3 位数字；**Tab 或空格** 时若发送/接收 RST 为空则填 `599` 并跳到下一项；呼号框 **空格** 跳到发送 RST |
+| **频率**            | **已实现**：MHz 三位小数；CAT 连接时只读；**手动改频**仅格式化，**不清**通联六框 |
+| **频率变化**（CAT） | **已实现**：CAT 读频变化时清除呼号/RST/姓名/QTH/备注（**不清频率**）；手动改频不触发 |
 | **点击清除**        | **已实现**：仅清空通联六框 + 隐藏历史面板；**不清**发送框、**不停**键控 |
 | **Esc**             | **已实现**：停止循环与键控发送、**清空发送框**；**不清**通联区 |
 | **记录通联**        | **已实现**：Ctrl+L /「记录」→ 追加 ADIF → 通联区淡色保留、发送框清空（频率保留） |
@@ -269,7 +269,7 @@
 | `Cat/Timeout_Ms`     | 单次读频超时（默认 1000） |
 | `Hardware/CAT_Port`  | **下拉枚举**系统串口；配置端口未插入时显示「(当前未检测到)」 |
 | `Hardware/CAT_Baud`  | 波特率（默认 **38400**） |
-| `Hardware/CAT_Address` | CI-V 地址（预留，Yaesu 未用） |
+| `Hardware/CAT_Address` | Icom CI-V 地址（十进制，IC-756PROIII 默认 **110** = 0x6E）；Yaesu 未用 |
 | `Hardware/Keying_Port` | 键控串口（下拉，规则同 CAT） |
 | `Hardware/Keying_Line` | DTR / RTS |
 | `Hardware/Keying_ActiveLow` | 低电平有效 / 高电平有效 |
@@ -291,6 +291,7 @@
 | `Station/MY_NAME` / `MY_QTH` | 己方姓名/地址（宏 `<name>` `<qth>` 等） |
 | `Station/Grid`    | 6 位 Grid（前缀距离/方位规划用） |
 | `Station/Power`   | 功率（配置保留；ADIF `tx_pwr` v1.2 未写） |
+| `Operation/TimeZone` | 记日志时区：`system` 或 IANA（如 `Asia/Shanghai`）；ADIF 时间字段写入前换算 **UTC** |
 
 ### 5.4 快捷键宏编辑（F1-F8）
 
@@ -375,7 +376,7 @@
 | v1.2 | 2026-05-16 | Yaesu CAT/键控协同、ADIF 记录、历史文本面板、通联区交互 |
 | v1.3 | 2026-05-16 | CTY 前缀库、WPM/提速、界面齿轮、去 CAT 调试日志、开源文档与 ignore |
 | v1.4 | 2026-05-21 | Icom CI-V、记录后淡色通联区、Alt 插入发送框、Esc/清除分工、PCKeyer 续发 |
-| v1.5 | 2026-05-21 | 当次日志窗、ADIF 编辑删除、QsoLog 写盘优化 |
+| v1.5 | 2026-05-21 | 当次日志窗、ADIF 编辑删除、UTC 时区、Icom CAT、设置测试、日志窗贴回、仅 CAT 清 QSO |
 
 ### 10.1 代码模块对照（v1.5）
 
@@ -384,6 +385,7 @@
 | ADIF 读写 | `src/adif/record.cpp`, `src/adif/file.cpp` |
 | 日志封装 | `src/qsolog.cpp`, `src/qsorecordformat.cpp` |
 | 当次日志 UI | `src/sessionlogwindow.cpp` |
+| ADIF UTC 时间 | `src/adiftime.cpp` |
 | CTY 前缀 | `src/callsignprefixdb.cpp` |
 | Yaesu / Icom CAT | `src/yaesucatreader.cpp`, `src/icomcatreader.cpp`, `src/catreaderfactory.cpp` |
 | 键控 | `src/pckeyer.cpp` |

@@ -44,9 +44,17 @@ public:
     // void onKeyerInterrupted() override;
     void onKeyerCharComplete(int index, QChar ch) override;
     void onKeyerBufferEmpty() override;
+
+    bool applyKeyingTest(bool on, const QString &port, const QString &line, bool activeLow);
+    void releaseKeyingTest();
+    bool readCatFrequencyTest(const QString &port, const QString &backend, int civAddr,
+                              double &mhzOut, QString &errorOut, bool &successOut);
+    void resumeCatPollingIfIdle();
+
 private slots:
     void onCallsignChanged(const QString &text);
     void onCallsignEditingFinished();
+    void onRstSentChanged(const QString &text);
     void onClearClicked();
     void onAbortSend();
     void onLogQsoClicked();
@@ -96,7 +104,6 @@ private:
     void toggleLoop(int index);     // 切换循环状态
     void cancelPostSendClearTimer();
     void syncCatPollingWithKeyer();       // 发射期间暂停 CAT 轮询
-    void resumeCatPollingIfIdle();
     bool isCatFrequencyQueryActive() const;
     void applySendInputUpdate(bool allowDeferForCatQuery = true);
     void appendToSendInput(const QString &text);
@@ -109,6 +116,8 @@ private:
     void hideQsoHistoryPanel();
     void showQsoHistoryForCall(const QString &call);
     void applyWpmToKeyer(int wpm);
+    void adjustWpm(int delta);
+    bool shouldArrowKeysAdjustWpm(QObject *watched) const;
     void initSessionLogWindow();
     void enterQsoEditMode(int sessionIndex, const adif::Record &rec);
     void exitQsoEditMode(bool clearAllFields);
@@ -160,13 +169,14 @@ protected:
     QSerialPort *m_catSerial = nullptr;
     bool m_serialPortsShared = false;
     bool m_catPollPausedForTx = false;
+    bool m_keyingTestHeld = false;
 
     IKeyer *m_keyer = nullptr;
     ICatReader *m_catReader = nullptr;
     bool m_catActive = false;
     double m_manualFreqMHz = 0.0;
     double m_lastCatFreqMHz = 0.0;
-    QDateTime m_qsoTimeOn; // 首次在呼号框输入时记下，用于 ADIF time_on
+    QDateTime m_qsoTimeOn; // 首次填写发送 RST 时记下，用于 ADIF time_on
     bool m_qsoFieldsFaded = false;
     bool m_suppressQsoFieldChange = false;
     QHash<QLineEdit *, QString> m_qsoFadedSnapshots;

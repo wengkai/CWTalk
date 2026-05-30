@@ -59,6 +59,7 @@ void Config::initDefaults()
     
     // 操作设置
     set("Operation/Default_WPM", 22);
+    set("Operation/TimeZone", "system");  // system=本机时区；或 IANA 如 Asia/Shanghai
     // set("Operation/CQ_Message", "CQ CQ CQ DE {MYCALL} K");
     set("Operation/CQ_Interval", 4);  // 秒
     set("Operation/Send_Clear_Delay_Sec", 2);  // 全部发完后延迟清空发送框；0=不自动清空

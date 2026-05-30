@@ -15,6 +15,7 @@ public:
     ~IcomCatReader() override;
 
     void setSerialPort(QSerialPort *port) override;
+    void setRadioAddress(quint8 addr);
 
     bool open() override;
     void close() override;
@@ -29,6 +30,8 @@ public:
     bool isFrequencyQueryActive() const override { return m_frequencyQueryActive; }
 
     void setBeforeTransaction(std::function<void()> hook) { m_beforeTransaction = std::move(hook); }
+
+    bool readOnce() override;
 
 private slots:
     void onPollTimer();
@@ -46,6 +49,7 @@ private:
     QSerialPort *m_port = nullptr;
     QTimer m_pollTimer;
     quint8 m_radioAddr = 0x6E;
+    bool m_radioAddrSet = false;
     bool m_frequencyQueryActive = false;
     bool m_pollSuspended = false;
     double m_freqMHz = 0.0;

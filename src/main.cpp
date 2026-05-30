@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QIcon>
 #include "mainwindow.h"
 // #include "config.h"
 
@@ -18,7 +19,11 @@ int main(int argc, char *argv[])
     #endif
 
     QApplication app(argc, argv);
-    
+
+    const QIcon appIcon(QStringLiteral(":/icon/cwtalk.ico"));
+    if (!appIcon.isNull())
+        app.setWindowIcon(appIcon);
+
     app.setStyleSheet(
         "QMainWindow { background-color: #333; }"
         "QMessageBox { background-color: #333; color: white; }"
@@ -67,6 +72,8 @@ int main(int argc, char *argv[])
     // });
 
     MainWindow window;
+    if (!appIcon.isNull())
+        window.setWindowIcon(appIcon);
     window.show();
     
     return app.exec();

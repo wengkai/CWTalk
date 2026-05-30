@@ -30,13 +30,21 @@ void IcomCatReader::setSerialPort(QSerialPort *port)
     m_port = port;
 }
 
+void IcomCatReader::setRadioAddress(quint8 addr)
+{
+    m_radioAddr = addr;
+    m_radioAddrSet = true;
+}
+
 bool IcomCatReader::open()
 {
     stopPolling();
     m_lastError.clear();
 
-    m_radioAddr = static_cast<quint8>(
-        theConfig.getInt("Hardware/CAT_Address", 0x6E) & 0xFF);
+    if (!m_radioAddrSet) {
+        m_radioAddr = static_cast<quint8>(
+            theConfig.getInt("Hardware/CAT_Address", 0x6E) & 0xFF);
+    }
 
     if (!m_port) {
         m_lastError = tr("未设置 CAT 串口");
@@ -56,6 +64,7 @@ bool IcomCatReader::open()
 void IcomCatReader::close()
 {
     stopPolling();
+    m_radioAddrSet = false;
     emit connectionStateChanged(false);
 }
 
@@ -146,7 +155,9 @@ bool IcomCatReader::readCiVFrame(QByteArray &frame, int timeoutMs)
 quint64 IcomCatReader::fromBcdHz(const unsigned char *data, int byteCount)
 {
     quint64 hz = 0;
-    for (int i = 0; i < byteCount; ++i) {
+    // for (int i = 0; i < byteCount; ++i) {
+    // 从低位到高位
+    for (int i = byteCount - 1; i >= 0; --i) {
         const unsigned char b = data[i];
         const unsigned hi = b >> 4;
         const unsigned lo = b & 0x0f;
@@ -267,6 +278,22 @@ void IcomCatReader::setFrequency(double mhz)
     m_freqMHz = rounded;
     m_hasFreq = true;
     emit frequencyChanged(m_freqMHz);
+}
+
+bool IcomCatReader::readOnce()
+{
+    const bool wasSuspended = m_pollSuspended;
+    m_pollSuspended = false;
+    beginFrequencyQuery();
+    double mhz = 0.0;
+    const bool ok = transactionReadFrequency(mhz);
+    if (ok) {
+        setFrequency(mhz);
+        m_lastError.clear();
+    }
+    endFrequencyQuery();
+    m_pollSuspended = wasSuspended;
+    return ok;
 }
 
 void IcomCatReader::onPollTimer()

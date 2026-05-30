@@ -42,6 +42,8 @@ public:
 
     // 同口 CAT 读频前释放 PTT/键控线，避免占用半双工串口
     void releaseKeyingLines();
+    // 设置界面 PTT 测试：直接控线，不走摩尔斯发送
+    void setPttTest(bool on);
     // QString buffer() const override { return m_buffer; }
     int currentIndex() const override { return m_currentIndex; }
     int firstEditableIndex() const override;
@@ -83,6 +85,7 @@ private:
     
     // 发送状态
     bool m_isSending = false;
+    bool m_pttTestActive = false;
     QString m_buffer;         // 完整字符串缓冲区
     int m_currentIndex = 0;   // 当前字符索引
     QString m_currentPattern; // 当前字符的摩尔斯模式（如 ".-.")

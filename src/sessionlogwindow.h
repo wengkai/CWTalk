@@ -44,6 +44,7 @@ private slots:
 private:
     int configuredHeight() const;
     void scrollToBottom();
+    void trySnapToMainWindow();
 
     QMainWindow *m_mainWindow = nullptr;
     QListWidget *m_list = nullptr;

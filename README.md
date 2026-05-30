@@ -128,4 +128,6 @@ cwtalk/
 
 本软件按「原样」提供。键控与 CAT 涉及电台与串口硬件连接，请自行确保电路隔离与安全，作者不对设备损坏或违规操作负责。使用 CTY 数据请遵守 [country-files.com](https://www.country-files.com/) 相关分发说明。
 
+This application uses the Qt Toolkit version 6.x under the GNU Lesser General Public License v3 (LGPLv3). The Qt libraries are dynamically linked. You can obtain the full source code for Qt from https://www.qt.io.
+
 
